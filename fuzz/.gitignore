@@ -13,3 +13,4 @@ corpus_lsan/
 crash-*
 hang-*
 fuzz-*
+slow-unit-*
