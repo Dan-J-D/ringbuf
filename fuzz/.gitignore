@@ -1,0 +1,15 @@
+*.swp
+
+fuzz_ringbuf_asan
+fuzz_ringbuf_msan
+fuzz_ringbuf_ubsan
+fuzz_ringbuf_lsan
+
+corpus_asan/
+corpus_msan/
+corpus_ubsan/
+corpus_lsan/
+
+crash-*
+hang-*
+fuzz-*
