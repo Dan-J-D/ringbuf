@@ -130,6 +130,10 @@ ringbuf_err ringbuf_init(struct ringbuf_t *rb, volatile void *buf, size_t buf_si
 
 ringbuf_err ringbuf_write(struct ringbuf_t *RESTRICT rb, const uint8_t *RESTRICT data, const size_t data_len)
 {
+    assert(rb != NULL);
+    assert(data != NULL);
+    assert(data_len > 0);
+
 #ifdef RINGBUF_STATISTICS
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -177,6 +181,11 @@ ringbuf_err ringbuf_write(struct ringbuf_t *RESTRICT rb, const uint8_t *RESTRICT
 
 ringbuf_err ringbuf_read(struct ringbuf_t *RESTRICT rb, uint8_t *RESTRICT out, size_t *RESTRICT out_len)
 {
+    assert(rb != NULL);
+    assert(out != NULL);
+    assert(out_len != NULL);
+    assert(*out_len > 0);
+
 #ifdef RINGBUF_STATISTICS
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -272,6 +281,7 @@ double ringbuf_avg_read_ns(struct ringbuf_t *rb)
 
 #endif // RINGBUF_IMPLEMENTATION
 
+#undef ERRORS
 #undef RESTRICT
 
 #endif // RINGBUF_H_
