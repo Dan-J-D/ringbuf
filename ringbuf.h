@@ -53,9 +53,11 @@ ringbuf_err ringbuf_read(struct ringbuf_t *RESTRICT rb, uint8_t *RESTRICT out, s
 
 const char *ringbuf_strerr(ringbuf_err e);
 
+#ifdef RINGBUF_STATISTICS
 void ringbuf_get_stats(struct ringbuf_t *rb, struct ringbuf_stats_t *out);
 double ringbuf_avg_write_ns(struct ringbuf_t *rb);
 double ringbuf_avg_read_ns(struct ringbuf_t *rb);
+#endif
 
 #ifdef RINGBUF_IMPLEMENTATION
 
