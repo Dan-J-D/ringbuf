@@ -97,7 +97,7 @@ struct buf_t
 };
 
 // returns 0 if there isnt enough space
-static inline uintptr_t align_sized(uintptr_t ptr, size_t *ptr_size, size_t alignment)
+inline uintptr_t align_sized(uintptr_t ptr, size_t *ptr_size, size_t alignment)
 {
     size_t unalignment = ptr % alignment;
     if (unalignment == 0)
@@ -112,7 +112,7 @@ static inline uintptr_t align_sized(uintptr_t ptr, size_t *ptr_size, size_t alig
 
 // if buf is shared memory, then caching must be disabled
 // buf must be pre zero'd out
-static ringbuf_err ringbuf_init(struct ringbuf_t *rb, volatile void *buf, size_t buf_size)
+ringbuf_err ringbuf_init(struct ringbuf_t *rb, volatile void *buf, size_t buf_size)
 {
     assert(rb != NULL);
     assert(buf != NULL);
@@ -128,7 +128,7 @@ static ringbuf_err ringbuf_init(struct ringbuf_t *rb, volatile void *buf, size_t
     return RbSuccess;
 }
 
-static ringbuf_err ringbuf_write(struct ringbuf_t *RESTRICT rb, const uint8_t *RESTRICT data, const size_t data_len)
+ringbuf_err ringbuf_write(struct ringbuf_t *RESTRICT rb, const uint8_t *RESTRICT data, const size_t data_len)
 {
 #ifdef RINGBUF_STATISTICS
     struct timespec start, end;
@@ -175,7 +175,7 @@ static ringbuf_err ringbuf_write(struct ringbuf_t *RESTRICT rb, const uint8_t *R
     return RbSuccess;
 }
 
-static ringbuf_err ringbuf_read(struct ringbuf_t *RESTRICT rb, uint8_t *RESTRICT out, size_t *RESTRICT out_len)
+ringbuf_err ringbuf_read(struct ringbuf_t *RESTRICT rb, uint8_t *RESTRICT out, size_t *RESTRICT out_len)
 {
 #ifdef RINGBUF_STATISTICS
     struct timespec start, end;
@@ -248,21 +248,21 @@ const char *ringbuf_strerr(ringbuf_err e)
 }
 
 #ifdef RINGBUF_STATISTICS
-static void ringbuf_get_stats(struct ringbuf_t *rb, struct ringbuf_stats_t *out)
+void ringbuf_get_stats(struct ringbuf_t *rb, struct ringbuf_stats_t *out)
 {
     assert(rb != NULL);
     assert(out != NULL);
     *out = rb->stats;
 }
 
-static double ringbuf_avg_write_ns(struct ringbuf_t *rb)
+double ringbuf_avg_write_ns(struct ringbuf_t *rb)
 {
     if (rb->stats.writes == 0)
         return 0;
     return (double)rb->stats.total_write_ns / rb->stats.writes;
 }
 
-static double ringbuf_avg_read_ns(struct ringbuf_t *rb)
+double ringbuf_avg_read_ns(struct ringbuf_t *rb)
 {
     if (rb->stats.reads == 0)
         return 0;
