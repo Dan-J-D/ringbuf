@@ -97,7 +97,7 @@ struct buf_t
 };
 
 // returns 0 if there isnt enough space
-inline uintptr_t align_sized(uintptr_t ptr, size_t *ptr_size, size_t alignment)
+static inline uintptr_t align_sized(uintptr_t ptr, size_t *ptr_size, size_t alignment)
 {
     size_t unalignment = ptr % alignment;
     if (unalignment == 0)
