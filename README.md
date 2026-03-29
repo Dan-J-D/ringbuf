@@ -1,6 +1,6 @@
 # ringbuf
 
-A single-header, lock-free ring buffer library written in C99/C11.
+A single-header, lock-free **SPSC** (Single Producer Single Consumer) ring buffer written in C99/C11.
 
 ## Features
 
@@ -122,7 +122,7 @@ The ring buffer uses C11 atomics with memory ordering:
 - **Writes**: `memory_order_relaxed` for loading head, `memory_order_acquire` for loading tail, `memory_order_release` for storing head
 - **Reads**: `memory_order_relaxed` for loading tail, `memory_order_acquire` for loading head, `memory_order_release` for storing tail
 
-This allows a single producer and single consumer to operate concurrently without locks.
+This allows a single producer and single consumer (SPSC) to operate concurrently without locks. For multi-producer or multi-consumer scenarios, you would need additional synchronization.
 
 ## Memory Layout
 
