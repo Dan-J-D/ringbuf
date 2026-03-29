@@ -34,6 +34,9 @@ Add `#define RINGBUF_IMPLEMENTATION` before including the header in one source f
 uint8_t buffer[8192];
 struct ringbuf_t rb;
 
+// make sure the buffer is zero'd before any ringbuf functions get called
+memset(buffer, 0, sizeof(buffer));
+
 ringbuf_init(&rb, buffer, sizeof(buffer));
 
 // Write data
