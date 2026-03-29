@@ -127,20 +127,6 @@ The ring buffer uses C11 atomics with memory ordering:
 
 This allows a single producer and single consumer (SPSC) to operate concurrently without locks. For multi-producer or multi-consumer scenarios, you would need additional synchronization.
 
-## Memory Layout
-
-```
-struct buf_t {
-    atomic_size_t head;        // 64-byte cache line
-    uint8_t pad_1[...];
-    atomic_size_t tail;       // 64-byte cache line
-    uint8_t pad_2[...];
-    uint8_t data[];            // flexible array member
-}
-```
-
-Each variable is padded to a full cache line (64 bytes) to prevent false sharing between head and tail.
-
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
