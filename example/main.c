@@ -27,10 +27,7 @@ void *writer(struct ringbuf_t *rb)
             return NULL;
         }
 
-        if (a == 254)
-            a = 0;
-        else
-            a++;
+        a = 0;
     }
     return NULL;
 }
@@ -40,7 +37,6 @@ void *reader(struct ringbuf_t *rb)
     time_t start = time(NULL);
     uint8_t expected = 0, got = 0;
     size_t read = sizeof(got);
-    uint64_t loops = 0;
     ringbuf_err err;
     while (difftime(time(NULL), start) < 3.5f)
     {
@@ -60,16 +56,8 @@ void *reader(struct ringbuf_t *rb)
             return NULL;
         }
 
-        if (expected == 254)
-        {
-            expected = 0;
-            loops++;
-        }
-        else
-            expected++;
+        expected++;
     }
-
-    printf("completed %lu loops\n", loops);
 
     return NULL;
 }
