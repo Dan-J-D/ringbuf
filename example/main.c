@@ -17,19 +17,20 @@ void *writer(struct ringbuf_t *rb)
     ringbuf_err err;
     while (difftime(time(NULL), start) < 3.f)
     {
-	err = ringbuf_write(rb, &a, sizeof(a));
-	if (err == RbNotEnoughSpace) continue;
+        err = ringbuf_write(rb, &a, sizeof(a));
+        if (err == RbNotEnoughSpace)
+            continue;
 
-	if (err != RbSuccess)
-	{
-	    fprintf(stderr, "[writer] Error - ringbuf_write() returns code: %s\n", ringbuf_strerr(err));
-	    return NULL;
-	}
+        if (err != RbSuccess)
+        {
+            fprintf(stderr, "[writer] Error - ringbuf_write() returns code: %s\n", ringbuf_strerr(err));
+            return NULL;
+        }
 
-	if (a == 254)
-	    a = 0;
-	else
-	    a++;
+        if (a == 254)
+            a = 0;
+        else
+            a++;
     }
     return NULL;
 }
@@ -43,31 +44,31 @@ void *reader(struct ringbuf_t *rb)
     ringbuf_err err;
     while (difftime(time(NULL), start) < 3.5f)
     {
-	err = ringbuf_read(rb, &got, &read);
-	if (err == RbEmpty) continue;
+        err = ringbuf_read(rb, &got, &read);
+        if (err == RbEmpty)
+            continue;
 
-	if (err != RbSuccess)
-	{
-	    fprintf(stderr, "[reader] Error - ringbuf_read() returns code: %s\n", ringbuf_strerr(err));
-	    return NULL;
-	}
+        if (err != RbSuccess)
+        {
+            fprintf(stderr, "[reader] Error - ringbuf_read() returns code: %s\n", ringbuf_strerr(err));
+            return NULL;
+        }
 
-	if (expected != got)
-	{
-	    fprintf(stderr, "[reader] Error - expected %d and got %d\n", expected, got);
-	    return NULL;
-	}
+        if (expected != got)
+        {
+            fprintf(stderr, "[reader] Error - expected %d and got %d\n", expected, got);
+            return NULL;
+        }
 
-
-	if (expected == 254)
-	{
-	    expected = 0;
-	    loops++;
-	}
-	else
-	    expected++;
+        if (expected == 254)
+        {
+            expected = 0;
+            loops++;
+        }
+        else
+            expected++;
     }
-    
+
     printf("completed %lu loops\n", loops);
 
     return NULL;
@@ -78,41 +79,44 @@ int main(void)
     pthread_t wthread, rthread;
     int ret;
 
-    enum { rbdata_size = 0x40000 };
+    enum
+    {
+        rbdata_size = 0x40000
+    };
     void *rbdata = calloc(1, rbdata_size);
     struct ringbuf_t *rb = (struct ringbuf_t *)calloc(1, sizeof(struct ringbuf_t));
     ringbuf_err rbe = ringbuf_init(rb, rbdata, rbdata_size);
     if (rbe != RbSuccess)
     {
-	fprintf(stderr, "Error - ringbuf_init() return code: %d\n", rbe);
-	return 1;
+        fprintf(stderr, "Error - ringbuf_init() return code: %d\n", rbe);
+        return 1;
     }
 
     ret = pthread_create(&wthread, NULL, (void *(*)(void *))writer, rb);
     if (ret)
     {
-	fprintf(stderr, "Error - pthread_create() return code: %d\n", ret);
-	return 1;
+        fprintf(stderr, "Error - pthread_create() return code: %d\n", ret);
+        return 1;
     }
 
     ret = pthread_create(&rthread, NULL, (void *(*)(void *))reader, rb);
     if (ret)
     {
-	fprintf(stderr, "Error - pthread_create() return code: %d\n", ret);
-	return 1;
+        fprintf(stderr, "Error - pthread_create() return code: %d\n", ret);
+        return 1;
     }
 
     ret = pthread_join(wthread, NULL);
     if (ret)
     {
-	fprintf(stderr, "Error - pthread_join() return code: %d\n", ret);
-	return 1;
+        fprintf(stderr, "Error - pthread_join() return code: %d\n", ret);
+        return 1;
     }
     ret = pthread_join(rthread, NULL);
     if (ret)
     {
-	fprintf(stderr, "Error - pthread_join() return code: %d\n", ret);
-	return 1;
+        fprintf(stderr, "Error - pthread_join() return code: %d\n", ret);
+        return 1;
     }
 
 #ifdef RINGBUF_STATISTICS
