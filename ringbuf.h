@@ -84,7 +84,7 @@ ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, s
  * @param e the error code
  * @return const char* string representation of the error
  */
-const char *ringbuf_strerr(ringbuf_err_t e);
+const char *ringbuf_strerr(const ringbuf_err_t e);
 
 #ifdef RINGBUF_STATISTICS
 /**
@@ -93,7 +93,7 @@ const char *ringbuf_strerr(ringbuf_err_t e);
  * @param rb the ring buffer
  * @param out output structure to store the statistics
  */
-void ringbuf_get_stats(struct ringbuf *rb, struct ringbuf_stats *out);
+void ringbuf_get_stats(const struct ringbuf *rb, struct ringbuf_stats *out);
 
 /**
  * @brief Gets the average time taken for a write operation in nanoseconds
@@ -101,7 +101,7 @@ void ringbuf_get_stats(struct ringbuf *rb, struct ringbuf_stats *out);
  * @param rb the ring buffer
  * @return double average write time in nanoseconds, or 0 if no writes have been performed
  */
-double ringbuf_avg_write_ns(struct ringbuf *rb);
+double ringbuf_avg_write_ns(const struct ringbuf *rb);
 
 /**
  * @brief Gets the average time taken for a read operation in nanoseconds
@@ -109,7 +109,7 @@ double ringbuf_avg_write_ns(struct ringbuf *rb);
  * @param rb the ring buffer
  * @return double average read time in nanoseconds, or 0 if no reads have been performed
  */
-double ringbuf_avg_read_ns(struct ringbuf *rb);
+double ringbuf_avg_read_ns(const struct ringbuf *rb);
 #endif
 
 #ifdef RINGBUF_IMPLEMENTATION
@@ -478,21 +478,21 @@ const char *ringbuf_strerr(ringbuf_err_t e)
 }
 
 #ifdef RINGBUF_STATISTICS
-void ringbuf_get_stats(struct ringbuf *rb, struct ringbuf_stats *out)
+void ringbuf_get_stats(const struct ringbuf *rb, struct ringbuf_stats *out)
 {
     assert(rb != NULL);
     assert(out != NULL);
     *out = rb->stats;
 }
 
-double ringbuf_avg_write_ns(struct ringbuf *rb)
+double ringbuf_avg_write_ns(const struct ringbuf *rb)
 {
     if (rb->stats.writes == 0)
         return 0;
     return (double)rb->stats.total_write_ns / rb->stats.writes;
 }
 
-double ringbuf_avg_read_ns(struct ringbuf *rb)
+double ringbuf_avg_read_ns(const struct ringbuf *rb)
 {
     if (rb->stats.reads == 0)
         return 0;
