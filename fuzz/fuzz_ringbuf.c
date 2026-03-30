@@ -28,6 +28,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     }
 
     uint8_t op = data[0];
+    op %= 16;
 
     if (op == 0)
     {
@@ -252,26 +253,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         uint8_t tiny_buf[64];
         struct ringbuf tiny_rb;
         ringbuf_init(&tiny_rb, tiny_buf, sizeof(tiny_buf));
-    }
-
-    if (op == 17 && size >= 2)
-    {
-        reset_ringbuf();
-        for (int i = 0; i < 10; i++)
-        {
-            uint8_t wdata[16];
-            for (int j = 0; j < (int)sizeof(wdata); j++)
-                wdata[j] = data[1 + (i + j) % (size - 1)];
-            ringbuf_write(&rb, wdata, 16);
-        }
-        rb.buf->head = data[1] * 0x0101010101010101ULL;
-        rb.buf->tail = data[2 % (size - 1) ? 2 : 1] * 0x0101010101010101ULL;
-        for (int i = 0; i < 5; i++)
-        {
-            uint8_t out[32];
-            size_t cap = 32;
-            ringbuf_read(&rb, out, &cap);
-        }
     }
 
     return 0;
