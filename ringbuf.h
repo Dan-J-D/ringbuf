@@ -48,14 +48,67 @@ struct ringbuf_stats
 };
 #endif
 
+/**
+ * @brief Iinitalizes ring buffer with a pre-allocated buffer
+ *
+ * @param rb a pre-allocated buffer atleast the sizeof(struct ringbuf)
+ * @param buf a pre-allocated buf wheren the main atomic structure/data is stored
+ * @param buf_size the size of param `buf`
+ * @return ringbuf_err_t RbSuccess on success, RbBufferTooSmall if buffer has insufficient space
+ */
 ringbuf_err_t ringbuf_init(struct ringbuf *rb, volatile void *buf, size_t buf_size);
+
+/**
+ * @brief Writes data to the ring buffer
+ *
+ * @param rb the ring buffer to write to
+ * @param data the data to write
+ * @param data_len length of the data to write
+ * @return ringbuf_err_t RbSuccess on success, RbNotEnoughSpace if buffer has insufficient space
+ */
 ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT data, const size_t data_len);
+
+/**
+ * @brief Reads data from the ring buffer
+ *
+ * @param rb the ring buffer to read from
+ * @param out output buffer to store the read data
+ * @param out_len on input, the size of the output buffer; on output, the number of bytes read
+ * @return ringbuf_err_t RbSuccess on success, RbEmpty if buffer is empty, RbBufferTooSmall if output buffer is too small, RbCorrupt if data is corrupted
+ */
 ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, size_t *RESTRICT out_len);
+
+/**
+ * @brief Returns a string representation of a ringbuf error code
+ *
+ * @param e the error code
+ * @return const char* string representation of the error
+ */
 const char *ringbuf_strerr(ringbuf_err_t e);
 
 #ifdef RINGBUF_STATISTICS
+/**
+ * @brief Gets statistics for the ring buffer
+ *
+ * @param rb the ring buffer
+ * @param out output structure to store the statistics
+ */
 void ringbuf_get_stats(struct ringbuf *rb, struct ringbuf_stats *out);
+
+/**
+ * @brief Gets the average time taken for a write operation in nanoseconds
+ *
+ * @param rb the ring buffer
+ * @return double average write time in nanoseconds, or 0 if no writes have been performed
+ */
 double ringbuf_avg_write_ns(struct ringbuf *rb);
+
+/**
+ * @brief Gets the average time taken for a read operation in nanoseconds
+ *
+ * @param rb the ring buffer
+ * @return double average read time in nanoseconds, or 0 if no reads have been performed
+ */
 double ringbuf_avg_read_ns(struct ringbuf *rb);
 #endif
 
@@ -212,8 +265,10 @@ ringbuf_err_t ringbuf_init(struct ringbuf *rb, volatile void *buf, size_t buf_si
     assert(buf_size > 0);
 
     buf = (void *)align_sized((uintptr_t)buf, &buf_size, RINGBUF_ALIGNMENT);
-    assert(buf != NULL);
-    assert(buf_size > sizeof(struct buf_t));
+    if (buf == NULL)
+        return RbBufferTooSmall;
+    if (buf_size <= sizeof(struct buf_t))
+        return RbBufferTooSmall;
 
     rb->buf = buf;
     rb->buf_data_size = buf_size - sizeof(struct buf_t);
