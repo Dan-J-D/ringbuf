@@ -1,4 +1,4 @@
-EXAMPLE1_CFLAGS := -Wall -Wextra -Wpedantic -fPIE -I..
+EXAMPLE1_CFLAGS := -Wall -Wextra -Wpedantic -fPIE -I.. -ggdb
 EXAMPLE2_CFLAGS := -Wall -Wextra -Wpedantic -fPIE -I.. -lpthread -m64
 
 .PHONY := clean

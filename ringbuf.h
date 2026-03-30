@@ -289,16 +289,78 @@ ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT
     else
         available = rb->buf_data_size - 1;
 
-    if (available <= sizeof(size_t) + data_len)
-        return RbNotEnoughSpace;
-
     size_t pos = head;
 
-    for (size_t i = 0; i < sizeof(size_t); i++)
+    // variable length numeric encoding
+    int8_t end_byte;
+
+#define LITTLE_ENDIAN_DEFINE                           \
+    end_byte = sizeof(data_len);                       \
+    for (; end_byte > 0; end_byte--)                   \
+        if (((uint8_t *)&data_len)[end_byte - 1] != 0) \
+    break
+#define BIG_ENDIAN_DEFINE                               \
+    end_byte = 1;                                       \
+    for (; end_byte < sizeof(data_len) + 1; end_byte--) \
+        if (((uint8_t *)&data_len)[end_byte - 1] != 0)  \
+    break
+
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    LITTLE_ENDIAN_DEFINE;
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    BIG_ENDIAN_DEFINE;
+#else
     {
-        rb->buf->data[pos] = ((uint8_t *)&data_len)[i];
+        uint16_t i = 1;
+        if (*(uint8_t *)&i == 1)
+            LITTLE_ENDIAN_DEFINE;
+        else
+            BIG_ENDIAN_DEFINE;
+    }
+#endif
+
+#undef LITTLE_ENDIAN_DEFINE
+#undef BIG_ENDIAN_DEFINE
+
+    if (available <= 1 + end_byte + data_len)
+        return RbNotEnoughSpace;
+
+    rb->buf->data[pos] = (uint8_t)end_byte;
+    pos = (pos + 1) % rb->buf_data_size;
+
+    for (size_t i = 0; i < (uint8_t)end_byte; i++)
+    {
+#define LITTLE_ENDIAN_DEFINE \
+    rb->buf->data[pos] = ((uint8_t *)&data_len)[i];
+#define BIG_ENDIAN_DEFINE \
+    rb->buf->data[pos] = ((uint8_t *)&data_len)[sizeof(data_len) - i];
+
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+        LITTLE_ENDIAN_DEFINE;
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        BIG_ENDIAN_DEFINE;
+#else
+        {
+            uint16_t i = 1;
+            if (*(uint8_t *)&i == 1)
+                LITTLE_ENDIAN_DEFINE;
+            else
+                BIG_ENDIAN_DEFINE;
+        }
+#endif
+
+#undef LITTLE_ENDIAN_DEFINE
+#undef BIG_ENDIAN_DEFINE
+
         pos = (pos + 1) % rb->buf_data_size;
     }
+
+    // old
+    // for (size_t i = 0; i < sizeof(size_t); i++)
+    // {
+    //     rb->buf->data[pos] = ((uint8_t *)&data_len)[i];
+    //     pos = (pos + 1) % rb->buf_data_size;
+    // }
 
     for (size_t i = 0; i < data_len; i++)
     {
@@ -340,13 +402,47 @@ ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, s
         return RbEmpty;
 
     size_t pos = tail;
-
     size_t data_len = 0;
-    for (size_t i = 0; i < sizeof(size_t); i++)
+
+    // variable length numeric encoding
+    uint8_t num_len = rb->buf->data[pos];
+    pos = (pos + 1) % rb->buf_data_size;
+
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+    for (size_t i = 0; i < MIN(num_len, sizeof(size_t)); i++)
     {
-        ((uint8_t *)&data_len)[i] = rb->buf->data[pos];
+#define LITTLE_ENDIAN_DEFINE \
+    ((uint8_t *)&data_len)[i] = rb->buf->data[pos];
+#define BIG_ENDIAN_DEFINE \
+    ((uint8_t *)&data_len)[sizeof(data_len) - i] = rb->buf->data[pos];
+
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+        LITTLE_ENDIAN_DEFINE;
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        BIG_ENDIAN_DEFINE;
+#else
+        {
+            uint16_t i = 1;
+            if (*(uint8_t *)&i == 1)
+                LITTLE_ENDIAN_DEFINE;
+            else
+                BIG_ENDIAN_DEFINE;
+        }
+#endif
+
+#undef LITTLE_ENDIAN_DEFINE
+#undef BIG_ENDIAN_DEFINE
+#undef MIN
+
         pos = (pos + 1) % rb->buf_data_size;
     }
+
+    // old
+    // for (size_t i = 0; i < sizeof(size_t); i++)
+    // {
+    //     ((uint8_t *)&data_len)[i] = rb->buf->data[pos];
+    //     pos = (pos + 1) % rb->buf_data_size;
+    // }
 
     size_t available;
     if (head >= tail)
@@ -354,14 +450,14 @@ ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, s
     else
         available = rb->buf_data_size - tail + head;
 
-    if (available < sizeof(size_t) + data_len)
+    if (available < 1 + num_len + data_len)
         return RbCorrupt;
 
     size_t capacity = *out_len;
     if (capacity < data_len)
     {
         *out_len = data_len;
-        pos = (tail + sizeof(size_t) + data_len) % rb->buf_data_size;
+        pos = (tail + 1 + num_len + data_len) % rb->buf_data_size;
         ringbuf_atomic_store_explicit(&rb->buf->tail, pos, RINGBUF_MEMORY_ORDER_RELEASE);
         return RbBufferTooSmall;
     }
