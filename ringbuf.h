@@ -202,38 +202,33 @@ static inline void ringbuf_atomic_store_explicit(volatile size_t *ptr, size_t va
 
 struct ringbuf
 {
-    volatile struct buf_t *buf;
+    volatile struct ringbuf_buf *buf;
     size_t buf_data_size;
 #ifdef RINGBUF_STATISTICS
     struct ringbuf_stats stats;
 #endif
 };
 
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
-struct buf_t
+struct ringbuf_buf
 {
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
     atomic_size_t head;
     uint8_t pad_1[RINGBUF_CACHE_LINE_SIZE - sizeof(atomic_size_t)];
 
     atomic_size_t tail;
     uint8_t pad_2[RINGBUF_CACHE_LINE_SIZE - sizeof(atomic_size_t)];
-
-    uint8_t data[];
-};
 #else
-struct buf_t
-{
     volatile size_t head;
     uint8_t pad_1[RINGBUF_CACHE_LINE_SIZE - sizeof(size_t)];
 
     volatile size_t tail;
     uint8_t pad_2[RINGBUF_CACHE_LINE_SIZE - sizeof(size_t)];
+#endif
 
     uint8_t data[];
 };
-#endif
 
-static inline uintptr_t align_sized(uintptr_t ptr, size_t *ptr_size, size_t alignment)
+static inline uintptr_t ringbuf_align_sized(uintptr_t ptr, size_t *ptr_size, size_t alignment)
 {
     size_t unalignment = ptr % alignment;
     if (unalignment == 0)
@@ -252,14 +247,14 @@ ringbuf_err_t ringbuf_init(struct ringbuf *rb, volatile void *buf, size_t buf_si
     assert(buf != NULL);
     assert(buf_size > 0);
 
-    buf = (void *)align_sized((uintptr_t)buf, &buf_size, RINGBUF_ALIGNMENT);
+    buf = (void *)ringbuf_align_sized((uintptr_t)buf, &buf_size, RINGBUF_ALIGNMENT);
     if (buf == NULL)
         return RbBufferTooSmall;
-    if (buf_size <= sizeof(struct buf_t))
+    if (buf_size <= sizeof(struct ringbuf_buf))
         return RbBufferTooSmall;
 
     rb->buf = buf;
-    rb->buf_data_size = buf_size - sizeof(struct buf_t);
+    rb->buf_data_size = buf_size - sizeof(struct ringbuf_buf);
 
     return RbSuccess;
 }
