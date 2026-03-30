@@ -1,6 +1,6 @@
 # ringbuf
 
-A single-header, lock-free **SPSC** (Single Producer Single Consumer) ring buffer written in C99/C11. Designed for fast thread-to-thread and cross-process shared memory communication.
+A single-header, lock-free **SPSC** (Single Producer Single Consumer) ring buffer written in C99+. Designed for fast thread-to-thread and cross-process shared memory communication.
 
 ## Features
 
