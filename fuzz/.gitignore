@@ -4,13 +4,20 @@ fuzz_ringbuf_asan
 fuzz_ringbuf_msan
 fuzz_ringbuf_ubsan
 fuzz_ringbuf_lsan
+fuzz_ringbuf_tsan
+fuzz_ringbuf_cov
+test_tsan
 
 corpus_asan/
 corpus_msan/
 corpus_ubsan/
 corpus_lsan/
+corpus_tsan/
 
 crash-*
 hang-*
 fuzz-*
 slow-unit-*
+cov.profraw
+cov.profdata
+default.profraw
