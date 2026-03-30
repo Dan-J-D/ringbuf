@@ -350,13 +350,6 @@ ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT
         pos = (pos + 1) % rb->buf_data_size;
     }
 
-    // old
-    // for (size_t i = 0; i < sizeof(size_t); i++)
-    // {
-    //     rb->buf->data[pos] = ((uint8_t *)&data_len)[i];
-    //     pos = (pos + 1) % rb->buf_data_size;
-    // }
-
     for (size_t i = 0; i < data_len; i++)
     {
         rb->buf->data[pos] = data[i];
@@ -431,13 +424,6 @@ ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, s
 
         pos = (pos + 1) % rb->buf_data_size;
     }
-
-    // old
-    // for (size_t i = 0; i < sizeof(size_t); i++)
-    // {
-    //     ((uint8_t *)&data_len)[i] = rb->buf->data[pos];
-    //     pos = (pos + 1) % rb->buf_data_size;
-    // }
 
     size_t available;
     if (head >= tail)
