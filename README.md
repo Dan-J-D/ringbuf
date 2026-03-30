@@ -11,6 +11,7 @@ A single-header, lock-free **SPSC** (Single Producer Single Consumer) ring buffe
 - **Optional statistics** - enable with `#define RINGBUF_STATISTICS` for timing metrics
 - **Shared memory compatible** - works with memory-mapped buffers
 - **Highly portable** - works with any C99+ compiler on architectures including x86, x86-64, ARM, ARM64, RISC-V, and more
+    - **Important** - on some non x86/x86-64 based systems (like ARM based systems) they might have cache Lines that are not 64 bytes, its very important to set `RINGBUF_CACHE_LINE_SIZE` and `RINGBUF_ALIGNMENT` correctly
 
 ## Portability
 
