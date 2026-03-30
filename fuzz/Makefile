@@ -56,5 +56,5 @@ run_lsan: $(FUZZER_lsan) $(CORPUS_lsan)
 	./$(FUZZER_lsan) $(CORPUS_lsan) -max_len=65536 -jobs=4 -workers=4
 
 clean:
-	rm -f $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) fuzz-*
+	rm -f $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) fuzz-* slow-unit-*
 	rm -rf corpus_asan corpus_msan corpus_ubsan corpus_lsan crash-* hang-*
