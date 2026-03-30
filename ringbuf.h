@@ -278,6 +278,9 @@ ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT
     size_t head = ringbuf_atomic_load_explicit(&rb->buf->head, RINGBUF_MEMORY_ORDER_RELAXED);
     size_t tail = ringbuf_atomic_load_explicit(&rb->buf->tail, RINGBUF_MEMORY_ORDER_ACQUIRE);
 
+    if (head >= rb->buf_data_size || tail >= rb->buf_data_size)
+        return RbCorrupt;
+
     size_t available;
     if (head > tail)
         available = rb->buf_data_size - head + tail;
@@ -330,6 +333,9 @@ ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, s
     size_t tail = ringbuf_atomic_load_explicit(&rb->buf->tail, RINGBUF_MEMORY_ORDER_RELAXED);
     size_t head = ringbuf_atomic_load_explicit(&rb->buf->head, RINGBUF_MEMORY_ORDER_ACQUIRE);
 
+    if (head >= rb->buf_data_size || tail >= rb->buf_data_size)
+        return RbCorrupt;
+
     if (tail == head)
         return RbEmpty;
 
@@ -355,6 +361,8 @@ ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, s
     if (capacity < data_len)
     {
         *out_len = data_len;
+        pos = (tail + sizeof(size_t) + data_len) % rb->buf_data_size;
+        ringbuf_atomic_store_explicit(&rb->buf->tail, pos, RINGBUF_MEMORY_ORDER_RELEASE);
         return RbBufferTooSmall;
     }
 

@@ -129,5 +129,150 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         }
     }
 
+    if (op == 7)
+    {
+        ringbuf_strerr(RbSuccess);
+        ringbuf_strerr(RbNotEnoughSpace);
+        ringbuf_strerr(RbEmpty);
+        ringbuf_strerr(RbBufferTooSmall);
+        ringbuf_strerr(RbCorrupt);
+    }
+
+    if (op == 8 && size >= 2)
+    {
+        uint8_t tiny_buf[64];
+        struct ringbuf tiny_rb;
+        uint8_t tiny_len = data[1] % 63 + 1;
+        ringbuf_err_t err = ringbuf_init(&tiny_rb, tiny_buf, tiny_len);
+        (void)err;
+    }
+
+    if (op == 9 && size >= 3)
+    {
+        uint8_t misaligned_buf[128];
+        uintptr_t align_offset = data[1] % 16 + 1;
+        uint8_t small_buf_size = data[2] % 32 + 1;
+        uint8_t *misaligned = misaligned_buf + align_offset;
+        struct ringbuf mis_rb;
+        ringbuf_init(&mis_rb, misaligned, small_buf_size);
+    }
+
+    if (op == 10)
+    {
+        for (int i = 0; i < 5000; i++)
+        {
+            uint8_t wdata[64];
+            for (int j = 0; j < (int)sizeof(wdata); j++)
+                wdata[j] = (uint8_t)(i ^ j);
+            ringbuf_write(&rb, wdata, 64);
+        }
+    }
+
+    if (op == 11 && size >= 5)
+    {
+        uint8_t len = data[1] % 16 + 1;
+        if (len > 0 && size >= 2 + len)
+        {
+            ringbuf_write(&rb, data + 2, len);
+            size_t read_len = 1;
+            uint8_t tmp[1];
+            ringbuf_read(&rb, tmp, &read_len);
+            uint8_t corrupt_len[sizeof(size_t)];
+            for (size_t i = 0; i < sizeof(size_t); i++)
+                corrupt_len[i] = data[3 + i % (size - 4)];
+            for (size_t i = 0; i < sizeof(size_t); i++)
+                rb.buf->data[(rb.buf->tail + i) % rb.buf_data_size] = corrupt_len[i];
+            size_t bad_len = 16;
+            uint8_t out[16];
+            ringbuf_read(&rb, out, &bad_len);
+        }
+    }
+
+    if (op == 12 && size >= 3)
+    {
+        uint8_t write_sz = data[1] % 16 + 1;
+        uint8_t read_sz = data[2] % 16 + 1;
+        for (int i = 0; i < 200; i++)
+        {
+            uint8_t wdata[32];
+            for (int j = 0; j < (int)sizeof(wdata); j++)
+                wdata[j] = (uint8_t)(i ^ j);
+            ringbuf_write(&rb, wdata, write_sz);
+            if (i % 3 == 0)
+            {
+                size_t rlen = read_sz;
+                uint8_t rbuf[32];
+                ringbuf_read(&rb, rbuf, &rlen);
+            }
+        }
+    }
+
+    if (op == 13 && size >= 3)
+    {
+        uint8_t num_writes = data[1] % 8 + 1;
+        uint8_t read_buf_size = data[2] % 8 + 1;
+        size_t off = 3;
+        for (uint8_t i = 0; i < num_writes && off + 16 <= size; i++)
+        {
+            ringbuf_write(&rb, data + off, 16);
+            off += 16;
+        }
+        for (uint8_t i = 0; i < 3; i++)
+        {
+            uint8_t out[32];
+            size_t cap = read_buf_size;
+            ringbuf_read(&rb, out, &cap);
+        }
+    }
+
+    if (op == 14)
+    {
+        for (int i = 0; i < 10000; i++)
+        {
+            uint8_t wdata[32];
+            for (int j = 0; j < (int)sizeof(wdata); j++)
+                wdata[j] = (uint8_t)(i ^ j);
+            ringbuf_write(&rb, wdata, 32);
+        }
+    }
+
+    if (op == 15)
+    {
+        uint8_t wdata[128];
+        for (int j = 0; j < (int)sizeof(wdata); j++)
+            wdata[j] = (uint8_t)(j);
+        ringbuf_write(&rb, wdata, 128);
+        size_t cap = 4;
+        uint8_t out[4];
+        ringbuf_read(&rb, out, &cap);
+    }
+
+    if (op == 16)
+    {
+        uint8_t tiny_buf[64];
+        struct ringbuf tiny_rb;
+        ringbuf_init(&tiny_rb, tiny_buf, sizeof(tiny_buf));
+    }
+
+    if (op == 17 && size >= 2)
+    {
+        reset_ringbuf();
+        for (int i = 0; i < 10; i++)
+        {
+            uint8_t wdata[16];
+            for (int j = 0; j < (int)sizeof(wdata); j++)
+                wdata[j] = data[1 + (i + j) % (size - 1)];
+            ringbuf_write(&rb, wdata, 16);
+        }
+        rb.buf->head = data[1] * 0x0101010101010101ULL;
+        rb.buf->tail = data[2 % (size - 1) ? 2 : 1] * 0x0101010101010101ULL;
+        for (int i = 0; i < 5; i++)
+        {
+            uint8_t out[32];
+            size_t cap = 32;
+            ringbuf_read(&rb, out, &cap);
+        }
+    }
+
     return 0;
 }
