@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 #if defined(__cplusplus)
-/* C++ does not have standard restrict, check compiler extensions */
 #if defined(__GNUC__) || defined(__clang__)
 #define RESTRICT __restrict__
 #elif defined(_MSC_VER)
@@ -14,17 +13,15 @@
 #define RESTRICT
 #endif
 #else
-/* C code */
 #if __STDC_VERSION__ >= 199901L
-#define RESTRICT restrict /* C99 or later */
+#define RESTRICT restrict
 #else
-#define RESTRICT /* pre-C99, empty */
+#define RESTRICT
 #endif
 #endif
 
 #define ERRORS          \
     X(RbSuccess)        \
-    X(RbOutOfMemory)    \
     X(RbNotEnoughSpace) \
     X(RbEmpty)          \
     X(RbBufferTooSmall) \
@@ -34,13 +31,13 @@
 typedef enum ringbuf_err
 {
     ERRORS
-} ringbuf_err;
+} ringbuf_err_t;
 #undef X
 
-struct ringbuf_t;
+struct ringbuf;
 
 #ifdef RINGBUF_STATISTICS
-struct ringbuf_stats_t
+struct ringbuf_stats
 {
     uint64_t bytes_written;
     uint64_t bytes_read;
@@ -49,54 +46,152 @@ struct ringbuf_stats_t
     uint64_t total_write_ns;
     uint64_t total_read_ns;
 };
-#endif // RINGBUF_STATISTICS
+#endif
 
-ringbuf_err ringbuf_init(struct ringbuf_t *rb, volatile void *buf, size_t buf_size);
-ringbuf_err ringbuf_write(struct ringbuf_t *RESTRICT rb, const uint8_t *RESTRICT data, const size_t data_len);
-ringbuf_err ringbuf_read(struct ringbuf_t *RESTRICT rb, uint8_t *RESTRICT out, size_t *RESTRICT out_len);
-
-const char *ringbuf_strerr(ringbuf_err e);
+ringbuf_err_t ringbuf_init(struct ringbuf *rb, volatile void *buf, size_t buf_size);
+ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT data, const size_t data_len);
+ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, size_t *RESTRICT out_len);
+const char *ringbuf_strerr(ringbuf_err_t e);
 
 #ifdef RINGBUF_STATISTICS
-void ringbuf_get_stats(struct ringbuf_t *rb, struct ringbuf_stats_t *out);
-double ringbuf_avg_write_ns(struct ringbuf_t *rb);
-double ringbuf_avg_read_ns(struct ringbuf_t *rb);
+void ringbuf_get_stats(struct ringbuf *rb, struct ringbuf_stats *out);
+double ringbuf_avg_write_ns(struct ringbuf *rb);
+double ringbuf_avg_read_ns(struct ringbuf *rb);
 #endif
 
 #ifdef RINGBUF_IMPLEMENTATION
 
-#include <stdatomic.h>
 #include <assert.h>
 
 #ifdef RINGBUF_STATISTICS
+#ifdef _WIN32
+#include <windows.h>
+typedef struct ringbuf_time
+{
+    LARGE_INTEGER counter;
+} ringbuf_time_t;
+static inline void ringbuf_get_time(ringbuf_time_t *t)
+{
+    QueryPerformanceCounter(&t->counter);
+}
+static inline uint64_t ringbuf_get_elapsed_ns(ringbuf_time_t *start, ringbuf_time_t *end)
+{
+    LARGE_INTEGER freq;
+    QueryPerformanceFrequency(&freq);
+    return (uint64_t)((end->counter.QuadPart - start->counter.QuadPart) * 1000000000ULL / freq.QuadPart);
+}
+#else
 #include <time.h>
+typedef struct ringbuf_time
+{
+    struct timespec ts;
+} ringbuf_time_t;
+static inline void ringbuf_get_time(ringbuf_time_t *t)
+{
+    clock_gettime(CLOCK_MONOTONIC, &t->ts);
+}
+static inline uint64_t ringbuf_get_elapsed_ns(ringbuf_time_t *start, ringbuf_time_t *end)
+{
+    return (uint64_t)(end->ts.tv_sec - start->ts.tv_sec) * 1000000000ULL + (uint64_t)(end->ts.tv_nsec - start->ts.tv_nsec);
+}
+#endif
 #endif
 
-#define CACHE_LINE_SIZE (64)
-#define RING_BUFFER_ALIGNMENT (0x1000)
+#ifndef RINGBUF_CACHE_LINE_SIZE
+#define RINGBUF_CACHE_LINE_SIZE (64)
+#endif
 
-struct ringbuf_t
+#ifndef RINGBUF_ALIGNMENT
+#define RINGBUF_ALIGNMENT (0x1000)
+#endif
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
+#include <stdatomic.h>
+#define ringbuf_atomic_load_explicit(ptr, order) \
+    atomic_load_explicit(ptr, order)
+#define ringbuf_atomic_store_explicit(ptr, val, order) \
+    atomic_store_explicit(ptr, val, order)
+#define RINGBUF_MEMORY_ORDER_RELAXED memory_order_relaxed
+#define RINGBUF_MEMORY_ORDER_ACQUIRE memory_order_acquire
+#define RINGBUF_MEMORY_ORDER_RELEASE memory_order_release
+#elif defined(__GNUC__) || defined(__clang__)
+#define RINGBUF_MEMORY_ORDER_RELAXED __ATOMIC_RELAXED
+#define RINGBUF_MEMORY_ORDER_ACQUIRE __ATOMIC_ACQUIRE
+#define RINGBUF_MEMORY_ORDER_RELEASE __ATOMIC_RELEASE
+static inline size_t ringbuf_atomic_load_explicit(volatile size_t *ptr, int order)
+{
+    return __atomic_load_n(ptr, order);
+}
+static inline void ringbuf_atomic_store_explicit(volatile size_t *ptr, size_t val, int order)
+{
+    __atomic_store_n(ptr, val, order);
+}
+#elif defined(_MSC_VER)
+#include <intrin.h>
+#define RINGBUF_MEMORY_ORDER_RELAXED 0
+#define RINGBUF_MEMORY_ORDER_ACQUIRE 2
+#define RINGBUF_MEMORY_ORDER_RELEASE 3
+static inline size_t ringbuf_atomic_load_explicit(volatile size_t *ptr, int order)
+{
+    (void)order;
+    _ReadWriteBarrier();
+    return *ptr;
+}
+static inline void ringbuf_atomic_store_explicit(volatile size_t *ptr, size_t val, int order)
+{
+    (void)order;
+    _ReadWriteBarrier();
+    *ptr = val;
+}
+#else
+#define RINGBUF_MEMORY_ORDER_RELAXED 0
+#define RINGBUF_MEMORY_ORDER_ACQUIRE 2
+#define RINGBUF_MEMORY_ORDER_RELEASE 3
+static inline size_t ringbuf_atomic_load_explicit(volatile size_t *ptr, int order)
+{
+    (void)order;
+    return *ptr;
+}
+static inline void ringbuf_atomic_store_explicit(volatile size_t *ptr, size_t val, int order)
+{
+    (void)order;
+    *ptr = val;
+}
+#endif
+
+struct ringbuf
 {
     volatile struct buf_t *buf;
     size_t buf_data_size;
 #ifdef RINGBUF_STATISTICS
-    struct ringbuf_stats_t stats;
+    struct ringbuf_stats stats;
 #endif
 };
 
-// Purpose of padding is so the variables are in different cache lines
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
 struct buf_t
 {
     atomic_size_t head;
-    uint8_t pad_1[CACHE_LINE_SIZE - sizeof(atomic_size_t)];
+    uint8_t pad_1[RINGBUF_CACHE_LINE_SIZE - sizeof(atomic_size_t)];
 
     atomic_size_t tail;
-    uint8_t pad_2[CACHE_LINE_SIZE - sizeof(atomic_size_t)];
+    uint8_t pad_2[RINGBUF_CACHE_LINE_SIZE - sizeof(atomic_size_t)];
 
     uint8_t data[];
 };
+#else
+struct buf_t
+{
+    volatile size_t head;
+    uint8_t pad_1[RINGBUF_CACHE_LINE_SIZE - sizeof(size_t)];
 
-// returns 0 if there isnt enough space
+    volatile size_t tail;
+    uint8_t pad_2[RINGBUF_CACHE_LINE_SIZE - sizeof(size_t)];
+
+    uint8_t data[];
+};
+#endif
+
 static inline uintptr_t align_sized(uintptr_t ptr, size_t *ptr_size, size_t alignment)
 {
     size_t unalignment = ptr % alignment;
@@ -110,16 +205,14 @@ static inline uintptr_t align_sized(uintptr_t ptr, size_t *ptr_size, size_t alig
     return ptr + (alignment - unalignment);
 }
 
-// if buf is shared memory, then caching must be disabled
-// buf must be pre zero'd out
-ringbuf_err ringbuf_init(struct ringbuf_t *rb, volatile void *buf, size_t buf_size)
+ringbuf_err_t ringbuf_init(struct ringbuf *rb, volatile void *buf, size_t buf_size)
 {
     assert(rb != NULL);
     assert(buf != NULL);
     assert(buf_size > 0);
 
-    buf = (void *)align_sized((uintptr_t)buf, &buf_size, RING_BUFFER_ALIGNMENT);
-    assert(buf != NULL); // not enough space in the buffer for ring buffer
+    buf = (void *)align_sized((uintptr_t)buf, &buf_size, RINGBUF_ALIGNMENT);
+    assert(buf != NULL);
     assert(buf_size > sizeof(struct buf_t));
 
     rb->buf = buf;
@@ -128,19 +221,19 @@ ringbuf_err ringbuf_init(struct ringbuf_t *rb, volatile void *buf, size_t buf_si
     return RbSuccess;
 }
 
-ringbuf_err ringbuf_write(struct ringbuf_t *RESTRICT rb, const uint8_t *RESTRICT data, const size_t data_len)
+ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT data, const size_t data_len)
 {
     assert(rb != NULL);
     assert(data != NULL);
     assert(data_len > 0);
 
 #ifdef RINGBUF_STATISTICS
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    ringbuf_time_t start, end;
+    ringbuf_get_time(&start);
 #endif
 
-    size_t head = atomic_load_explicit(&rb->buf->head, memory_order_relaxed);
-    size_t tail = atomic_load_explicit(&rb->buf->tail, memory_order_acquire);
+    size_t head = ringbuf_atomic_load_explicit(&rb->buf->head, RINGBUF_MEMORY_ORDER_RELAXED);
+    size_t tail = ringbuf_atomic_load_explicit(&rb->buf->tail, RINGBUF_MEMORY_ORDER_ACQUIRE);
 
     size_t available;
     if (head > tail)
@@ -167,11 +260,11 @@ ringbuf_err ringbuf_write(struct ringbuf_t *RESTRICT rb, const uint8_t *RESTRICT
         pos = (pos + 1) % rb->buf_data_size;
     }
 
-    atomic_store_explicit(&rb->buf->head, pos, memory_order_release);
+    ringbuf_atomic_store_explicit(&rb->buf->head, pos, RINGBUF_MEMORY_ORDER_RELEASE);
 
 #ifdef RINGBUF_STATISTICS
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    rb->stats.total_write_ns += (end.tv_sec - start.tv_sec) * 1000000000ULL + (end.tv_nsec - start.tv_nsec);
+    ringbuf_get_time(&end);
+    rb->stats.total_write_ns += ringbuf_get_elapsed_ns(&start, &end);
     rb->stats.writes++;
     rb->stats.bytes_written += sizeof(size_t) + data_len;
 #endif
@@ -179,7 +272,7 @@ ringbuf_err ringbuf_write(struct ringbuf_t *RESTRICT rb, const uint8_t *RESTRICT
     return RbSuccess;
 }
 
-ringbuf_err ringbuf_read(struct ringbuf_t *RESTRICT rb, uint8_t *RESTRICT out, size_t *RESTRICT out_len)
+ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, size_t *RESTRICT out_len)
 {
     assert(rb != NULL);
     assert(out != NULL);
@@ -187,12 +280,12 @@ ringbuf_err ringbuf_read(struct ringbuf_t *RESTRICT rb, uint8_t *RESTRICT out, s
     assert(*out_len > 0);
 
 #ifdef RINGBUF_STATISTICS
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    ringbuf_time_t start, end;
+    ringbuf_get_time(&start);
 #endif
 
-    size_t tail = atomic_load_explicit(&rb->buf->tail, memory_order_relaxed);
-    size_t head = atomic_load_explicit(&rb->buf->head, memory_order_acquire);
+    size_t tail = ringbuf_atomic_load_explicit(&rb->buf->tail, RINGBUF_MEMORY_ORDER_RELAXED);
+    size_t head = ringbuf_atomic_load_explicit(&rb->buf->head, RINGBUF_MEMORY_ORDER_ACQUIRE);
 
     if (tail == head)
         return RbEmpty;
@@ -230,11 +323,11 @@ ringbuf_err ringbuf_read(struct ringbuf_t *RESTRICT rb, uint8_t *RESTRICT out, s
 
     *out_len = data_len;
 
-    atomic_store_explicit(&rb->buf->tail, pos, memory_order_release);
+    ringbuf_atomic_store_explicit(&rb->buf->tail, pos, RINGBUF_MEMORY_ORDER_RELEASE);
 
 #ifdef RINGBUF_STATISTICS
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    rb->stats.total_read_ns += (end.tv_sec - start.tv_sec) * 1000000000ULL + (end.tv_nsec - start.tv_nsec);
+    ringbuf_get_time(&end);
+    rb->stats.total_read_ns += ringbuf_get_elapsed_ns(&start, &end);
     rb->stats.reads++;
     rb->stats.bytes_read += sizeof(size_t) + data_len;
 #endif
@@ -242,7 +335,7 @@ ringbuf_err ringbuf_read(struct ringbuf_t *RESTRICT rb, uint8_t *RESTRICT out, s
     return RbSuccess;
 }
 
-const char *ringbuf_strerr(ringbuf_err e)
+const char *ringbuf_strerr(ringbuf_err_t e)
 {
 #define X(name) \
     case name:  \
@@ -257,31 +350,34 @@ const char *ringbuf_strerr(ringbuf_err e)
 }
 
 #ifdef RINGBUF_STATISTICS
-void ringbuf_get_stats(struct ringbuf_t *rb, struct ringbuf_stats_t *out)
+void ringbuf_get_stats(struct ringbuf *rb, struct ringbuf_stats *out)
 {
     assert(rb != NULL);
     assert(out != NULL);
     *out = rb->stats;
 }
 
-double ringbuf_avg_write_ns(struct ringbuf_t *rb)
+double ringbuf_avg_write_ns(struct ringbuf *rb)
 {
     if (rb->stats.writes == 0)
         return 0;
     return (double)rb->stats.total_write_ns / rb->stats.writes;
 }
 
-double ringbuf_avg_read_ns(struct ringbuf_t *rb)
+double ringbuf_avg_read_ns(struct ringbuf *rb)
 {
     if (rb->stats.reads == 0)
         return 0;
     return (double)rb->stats.total_read_ns / rb->stats.reads;
 }
-#endif // RINGBUF_STATISTICS
+#endif
 
-#endif // RINGBUF_IMPLEMENTATION
+#undef RINGBUF_ALIGNMENT
+#undef RINGBUF_CACHE_LINE_SIZE
+
+#endif
 
 #undef ERRORS
 #undef RESTRICT
 
-#endif // RINGBUF_H_
+#endif
