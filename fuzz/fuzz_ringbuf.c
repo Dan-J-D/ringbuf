@@ -38,7 +38,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     if (op == 1 && size >= 2)
     {
         uint8_t len = data[1] % 129;
-        if (size >= 2 + len)
+        if (len > 0 && size >= 2 + len)
         {
             ringbuf_write(&rb, data + 2, len);
         }
@@ -47,9 +47,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     if (op == 2 && size >= 2)
     {
         size_t out_len = data[1] % 257;
-        uint8_t out[257];
-        ringbuf_err_t err = ringbuf_read(&rb, out, &out_len);
-        (void)err;
+        if (out_len > 0)
+        {
+            uint8_t out[257];
+            ringbuf_err_t err = ringbuf_read(&rb, out, &out_len);
+            (void)err;
+        }
     }
 
     if (op == 3 && size >= 2)
@@ -59,7 +62,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         for (uint8_t i = 0; i < num_ops && off + 1 < size; i++)
         {
             uint8_t len = data[off] % 65;
-            if (off + 1 + len <= size)
+            if (len > 0 && off + 1 + len <= size)
             {
                 ringbuf_write(&rb, data + off + 1, len);
             }
@@ -72,16 +75,57 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         uint8_t write_len = data[1] % 33;
         uint8_t read_len = data[2] % 65;
         size_t off = 3;
-        if (off + write_len <= size)
+        if (write_len > 0 && off + write_len <= size)
         {
             ringbuf_write(&rb, data + off, write_len);
             off += write_len;
         }
-        if (off + read_len <= size)
+        if (read_len > 0 && off + read_len <= size)
         {
             size_t OL = read_len;
             uint8_t out[65];
             ringbuf_read(&rb, out, &OL);
+        }
+    }
+
+    if (op == 5 && size >= 3)
+    {
+        uint8_t num_cycles = data[1] % 17;
+        size_t off = 2;
+        for (uint8_t i = 0; i < num_cycles && off + 130 < size; i++)
+        {
+            uint8_t write_len = data[off] % 129;
+            uint8_t read_len = data[off + 1] % 129;
+            off += 2;
+
+            if (write_len > 0)
+            {
+                ringbuf_write(&rb, data + off, write_len);
+            }
+            off += write_len;
+
+            if (read_len > 0)
+            {
+                size_t OL = read_len;
+                uint8_t out[129];
+                ringbuf_err_t err = ringbuf_read(&rb, out, &OL);
+                (void)err;
+            }
+        }
+    }
+
+    if (op == 6 && size >= 2)
+    {
+        uint8_t num_writes = data[1] % 65;
+        size_t off = 2;
+        for (uint8_t i = 0; i < num_writes && off + 129 < size; i++)
+        {
+            uint8_t len = data[off] % 129;
+            if (len > 0 && off + 1 + len <= size)
+            {
+                ringbuf_write(&rb, data + off + 1, len);
+            }
+            off += 1 + len;
         }
     }
 
