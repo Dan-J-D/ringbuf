@@ -197,19 +197,7 @@ static inline void ringbuf_atomic_store_explicit(volatile size_t *ptr, size_t va
     *ptr = val;
 }
 #else
-#define RINGBUF_MEMORY_ORDER_RELAXED 0
-#define RINGBUF_MEMORY_ORDER_ACQUIRE 2
-#define RINGBUF_MEMORY_ORDER_RELEASE 3
-static inline size_t ringbuf_atomic_load_explicit(volatile size_t *ptr, int order)
-{
-    (void)order;
-    return *ptr;
-}
-static inline void ringbuf_atomic_store_explicit(volatile size_t *ptr, size_t val, int order)
-{
-    (void)order;
-    *ptr = val;
-}
+#error "Unsupported platform: atomics require C11, GCC/Clang __atomic intrinsics, or MSVC"
 #endif
 
 struct ringbuf
