@@ -5,254 +5,335 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int initialized = 0;
-static struct ringbuf rb;
-static uint8_t buffer[65536];
+enum
+{
+    OP_RESET,
+    OP_WRITE,
+    OP_READ,
+    OP_WRITE_READ_MIX,
+    OP_MULTI_WRITE,
+    OP_MULTI_READ,
+    OP_MIXED_OPS,
+    OP_STRESS_SMALL,
+    OP_STRESS_MEDIUM,
+    OP_STRESS_LARGE,
+    OP_CORRUPTION_INJECTION,
+    OP_STRERR,
+    NUM_OPS
+};
 
-static void reset_ringbuf(void)
+static struct ringbuf rb;
+static uint8_t buffer[0x2000] __attribute__((aligned(0x1000)));
+static int initialized = 0;
+
+static int reset_ringbuf(void)
 {
     memset(buffer, 0, sizeof(buffer));
     memset(&rb, 0, sizeof(rb));
-    ringbuf_init(&rb, buffer, sizeof(buffer));
+    ringbuf_err_t err = ringbuf_init(&rb, buffer, sizeof(buffer));
+    if (err != RbSuccess)
+        return 0;
+    return 1;
+}
+
+static ringbuf_err_t do_write(const uint8_t *data, size_t data_len)
+{
+    if (data_len == 0)
+        return RbSuccess;
+    if (rb.buf == NULL)
+        return RbCorrupt;
+    return ringbuf_write(&rb, data, data_len);
+}
+
+static ringbuf_err_t do_read(size_t max_read)
+{
+    if (rb.buf == NULL)
+        return RbCorrupt;
+    uint8_t tmp[256];
+    size_t len = max_read < sizeof(tmp) ? max_read : sizeof(tmp);
+    if (len == 0)
+        return RbSuccess;
+    return ringbuf_read(&rb, tmp, &len);
+}
+
+static size_t min_size(size_t a, size_t b)
+{
+    return a < b ? a : b;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    if (size < 1)
+    if (size < 2)
         return 0;
 
     if (!initialized)
     {
-        reset_ringbuf();
+        if (!reset_ringbuf())
+            return 0;
         initialized = 1;
     }
 
-    uint8_t op = data[0];
-    op %= 16;
+    uint8_t op = data[0] % NUM_OPS;
+    size_t off = 1;
 
-    if (op == 0)
+    switch (op)
+    {
+    case OP_RESET:
     {
         reset_ringbuf();
-        return 0;
+        break;
     }
 
-    if (op == 1 && size >= 2)
+    case OP_WRITE:
     {
-        uint8_t len = data[1] % 129;
-        if (len > 0 && size >= 2 + len)
+        if (off < size)
         {
-            ringbuf_write(&rb, data + 2, len);
-        }
-    }
-
-    if (op == 2 && size >= 2)
-    {
-        size_t out_len = data[1] % 257;
-        if (out_len > 0)
-        {
-            uint8_t out[257];
-            ringbuf_err_t err = ringbuf_read(&rb, out, &out_len);
-            (void)err;
-        }
-    }
-
-    if (op == 3 && size >= 2)
-    {
-        uint8_t num_ops = data[1] % 17;
-        size_t off = 2;
-        for (uint8_t i = 0; i < num_ops && off + 1 < size; i++)
-        {
-            uint8_t len = data[off] % 65;
+            size_t len = data[off] % 257;
             if (len > 0 && off + 1 + len <= size)
             {
-                ringbuf_write(&rb, data + off + 1, len);
+                do_write(data + off + 1, len);
             }
-            off += 1 + len;
         }
+        break;
     }
 
-    if (op == 4 && size >= 3)
+    case OP_READ:
     {
-        uint8_t write_len = data[1] % 33;
-        uint8_t read_len = data[2] % 65;
-        size_t off = 3;
-        if (write_len > 0 && off + write_len <= size)
+        if (off < size)
         {
-            ringbuf_write(&rb, data + off, write_len);
-            off += write_len;
+            size_t max_read = data[off] % 257;
+            do_read(max_read);
         }
-        if (read_len > 0 && off + read_len <= size)
-        {
-            size_t OL = read_len;
-            uint8_t out[65];
-            ringbuf_read(&rb, out, &OL);
-        }
+        break;
     }
 
-    if (op == 5 && size >= 3)
+    case OP_WRITE_READ_MIX:
     {
-        uint8_t num_cycles = data[1] % 17;
-        size_t off = 2;
-        for (uint8_t i = 0; i < num_cycles && off + 130 < size; i++)
+        if (off + 2 <= size)
         {
-            uint8_t write_len = data[off] % 129;
-            uint8_t read_len = data[off + 1] % 129;
-            off += 2;
-
-            if (write_len > 0)
+            size_t write_len = data[off] % 129;
+            size_t read_len = data[off + 1] % 65;
+            if (write_len > 0 && off + 2 + write_len <= size)
             {
-                ringbuf_write(&rb, data + off, write_len);
+                do_write(data + off + 2, write_len);
             }
-            off += write_len;
+            do_read(read_len);
+        }
+        break;
+    }
 
-            if (read_len > 0)
+    case OP_MULTI_WRITE:
+    {
+        if (off < size)
+        {
+            uint8_t num_writes = (data[off] % 17) + 1;
+            size_t pos = off + 1;
+            for (uint8_t i = 0; i < num_writes && pos + 1 < size; i++)
             {
-                size_t OL = read_len;
-                uint8_t out[129];
-                ringbuf_err_t err = ringbuf_read(&rb, out, &OL);
-                (void)err;
+                size_t len = data[pos] % 257;
+                pos++;
+                if (len > 0 && pos + len <= size)
+                {
+                    do_write(data + pos, len);
+                    pos += len;
+                }
+                else
+                {
+                    break;
+                }
             }
         }
+        break;
     }
 
-    if (op == 6 && size >= 2)
+    case OP_MULTI_READ:
     {
-        uint8_t num_writes = data[1] % 65;
-        size_t off = 2;
-        for (uint8_t i = 0; i < num_writes && off + 129 < size; i++)
+        if (off < size)
         {
-            uint8_t len = data[off] % 129;
-            if (len > 0 && off + 1 + len <= size)
+            uint8_t num_reads = (data[off] % 17) + 1;
+            size_t pos = off + 1;
+            for (uint8_t i = 0; i < num_reads && pos < size; i++)
             {
-                ringbuf_write(&rb, data + off + 1, len);
+                size_t max_read = data[pos] % 257;
+                pos++;
+                do_read(max_read);
             }
-            off += 1 + len;
         }
+        break;
     }
 
-    if (op == 7)
+    case OP_MIXED_OPS:
     {
-        ringbuf_strerr(RbSuccess);
-        ringbuf_strerr(RbNotEnoughSpace);
-        ringbuf_strerr(RbEmpty);
-        ringbuf_strerr(RbBufferTooSmall);
-        ringbuf_strerr(RbCorrupt);
-    }
-
-    if (op == 8 && size >= 2)
-    {
-        uint8_t tiny_buf[64];
-        struct ringbuf tiny_rb;
-        uint8_t tiny_len = data[1] % 63 + 1;
-        ringbuf_err_t err = ringbuf_init(&tiny_rb, tiny_buf, tiny_len);
-        (void)err;
-    }
-
-    if (op == 9 && size >= 3)
-    {
-        uint8_t misaligned_buf[128];
-        uintptr_t align_offset = data[1] % 16 + 1;
-        uint8_t small_buf_size = data[2] % 32 + 1;
-        uint8_t *misaligned = misaligned_buf + align_offset;
-        struct ringbuf mis_rb;
-        ringbuf_init(&mis_rb, misaligned, small_buf_size);
-    }
-
-    if (op == 10)
-    {
-        for (int i = 0; i < 5000; i++)
+        if (off < size)
         {
-            uint8_t wdata[64];
-            for (int j = 0; j < (int)sizeof(wdata); j++)
-                wdata[j] = (uint8_t)(i ^ j);
-            ringbuf_write(&rb, wdata, 64);
-        }
-    }
-
-    if (op == 11 && size >= 5)
-    {
-        uint8_t len = data[1] % 16 + 1;
-        if (len > 0 && size >= 2 + len)
-        {
-            ringbuf_write(&rb, data + 2, len);
-            size_t read_len = 1;
-            uint8_t tmp[1];
-            ringbuf_read(&rb, tmp, &read_len);
-            uint8_t corrupt_len[sizeof(size_t)];
-            for (size_t i = 0; i < sizeof(size_t); i++)
-                corrupt_len[i] = data[3 + i % (size - 4)];
-            for (size_t i = 0; i < sizeof(size_t); i++)
-                rb.buf->data[(rb.buf->tail + i) % rb.buf_data_size] = corrupt_len[i];
-            size_t bad_len = 16;
-            uint8_t out[16];
-            ringbuf_read(&rb, out, &bad_len);
-        }
-    }
-
-    if (op == 12 && size >= 3)
-    {
-        uint8_t write_sz = data[1] % 16 + 1;
-        uint8_t read_sz = data[2] % 16 + 1;
-        for (int i = 0; i < 200; i++)
-        {
-            uint8_t wdata[32];
-            for (int j = 0; j < (int)sizeof(wdata); j++)
-                wdata[j] = (uint8_t)(i ^ j);
-            ringbuf_write(&rb, wdata, write_sz);
-            if (i % 3 == 0)
+            uint8_t num_ops = (data[off] % 17) + 1;
+            size_t pos = off + 1;
+            for (uint8_t i = 0; i < num_ops && pos + 1 < size; i++)
             {
-                size_t rlen = read_sz;
-                uint8_t rbuf[32];
-                ringbuf_read(&rb, rbuf, &rlen);
+                uint8_t sub_op = data[pos] % 3;
+                pos++;
+                switch (sub_op)
+                {
+                case 0:
+                {
+                    size_t len = data[pos] % 257;
+                    pos++;
+                    if (len > 0 && pos + len <= size)
+                    {
+                        do_write(data + pos, len);
+                        pos += len;
+                    }
+                    break;
+                }
+                case 1:
+                {
+                    size_t max_read = data[pos] % 257;
+                    pos++;
+                    do_read(max_read);
+                    break;
+                }
+                case 2:
+                {
+                    reset_ringbuf();
+                    break;
+                }
+                }
             }
         }
+        break;
     }
 
-    if (op == 13 && size >= 3)
+    case OP_STRESS_SMALL:
     {
-        uint8_t num_writes = data[1] % 8 + 1;
-        uint8_t read_buf_size = data[2] % 8 + 1;
-        size_t off = 3;
-        for (uint8_t i = 0; i < num_writes && off + 16 <= size; i++)
+        uint8_t num_ops = (data[off] % 33) + 1;
+        size_t pos = off + 1;
+        for (uint8_t i = 0; i < num_ops && pos < size; i++)
         {
-            ringbuf_write(&rb, data + off, 16);
-            off += 16;
+            size_t len = data[pos] % 17;
+            pos++;
+            if (len > 0 && pos + len <= size)
+            {
+                do_write(data + pos, len);
+                pos += len;
+            }
+            if (i % 3 == 2)
+            {
+                do_read(data[pos % size] % 17);
+            }
         }
-        for (uint8_t i = 0; i < 3; i++)
+        break;
+    }
+
+    case OP_STRESS_MEDIUM:
+    {
+        uint8_t num_ops = (data[off] % 17) + 1;
+        size_t pos = off + 1;
+        for (uint8_t i = 0; i < num_ops && pos < size; i++)
         {
-            uint8_t out[32];
-            size_t cap = read_buf_size;
-            ringbuf_read(&rb, out, &cap);
+            size_t write_len = data[pos] % 129;
+            pos++;
+            if (write_len > 0 && pos + write_len <= size)
+            {
+                do_write(data + pos, write_len);
+                pos += write_len;
+            }
+
+            size_t read_len = data[pos % size] % 65;
+            do_read(read_len);
         }
+        break;
     }
 
-    if (op == 14)
+    case OP_STRESS_LARGE:
     {
-        for (int i = 0; i < 10000; i++)
+        uint8_t num_ops = (data[off] % 9) + 1;
+        size_t pos = off + 1;
+        for (uint8_t i = 0; i < num_ops && pos < size; i++)
         {
-            uint8_t wdata[32];
-            for (int j = 0; j < (int)sizeof(wdata); j++)
-                wdata[j] = (uint8_t)(i ^ j);
-            ringbuf_write(&rb, wdata, 32);
+            size_t write_len = data[pos] % 513;
+            pos++;
+            if (write_len > 0 && pos + write_len <= size)
+            {
+                do_write(data + pos, write_len);
+                pos += write_len;
+            }
+
+            if (i % 2 == 1)
+            {
+                size_t read_len = data[pos % size] % 257;
+                do_read(read_len);
+            }
         }
+        break;
     }
 
-    if (op == 15)
+    case OP_CORRUPTION_INJECTION:
     {
-        uint8_t wdata[128];
-        for (int j = 0; j < (int)sizeof(wdata); j++)
-            wdata[j] = (uint8_t)(j);
-        ringbuf_write(&rb, wdata, 128);
-        size_t cap = 4;
-        uint8_t out[4];
-        ringbuf_read(&rb, out, &cap);
+        if (off + 2 <= size)
+        {
+            uint8_t num_writes = (data[off] % 5) + 1;
+            uint8_t num_reads = (data[off + 1] % 5) + 1;
+            size_t pos = off + 2;
+
+            for (uint8_t i = 0; i < num_writes && pos < size; i++)
+            {
+                size_t len = data[pos] % 65;
+                pos++;
+                if (len > 0 && pos + len <= size)
+                {
+                    do_write(data + pos, len);
+                    pos += len;
+                }
+            }
+
+            uint8_t saved_buffer[sizeof(buffer)];
+            memcpy(saved_buffer, buffer, sizeof(buffer));
+
+            size_t corrupt_pos = data[pos % min_size(size, 4096)] % sizeof(buffer);
+            size_t corrupt_len = data[(pos + 1) % min_size(size, 4096)] % 65;
+            if (corrupt_len > 0 && corrupt_pos + corrupt_len <= sizeof(buffer) && pos + 2 + corrupt_len <= size)
+            {
+                memcpy(buffer + corrupt_pos, data + pos + 2, corrupt_len);
+            }
+
+            if (off + 3 < size)
+            {
+                uint8_t corrupt_write[65];
+                size_t write_len = data[off + 2] % 65;
+                if (write_len > 0 && off + 3 + write_len <= size && off + 2 + write_len <= size)
+                {
+                    memcpy(corrupt_write, data + off + 3, write_len);
+                    for (size_t j = 0; j < write_len; j++)
+                    {
+                        corrupt_write[j] ^= data[(pos + j + 1) % min_size(size, 4096)];
+                    }
+                    ringbuf_write(&rb, corrupt_write, write_len);
+                }
+            }
+
+            for (uint8_t i = 0; i < num_reads; i++)
+            {
+                do_read(data[(off + i + 1) % min_size(size, 256)] % 65);
+            }
+
+            if (off + 2 < size)
+            {
+                do_read(data[off + 2] % 129);
+            }
+
+            memcpy(buffer, saved_buffer, sizeof(buffer));
+        }
+        break;
     }
 
-    if (op == 16)
+    case OP_STRERR:
     {
-        uint8_t tiny_buf[64];
-        struct ringbuf tiny_rb;
-        ringbuf_init(&tiny_rb, tiny_buf, sizeof(tiny_buf));
+        ringbuf_strerr((ringbuf_err_t)(off < size ? data[off] : 0));
+        break;
+    }
+
+    default:
+        break;
     }
 
     return 0;

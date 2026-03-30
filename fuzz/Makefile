@@ -7,7 +7,6 @@ CFLAGS_asan = $(CFLAGS_COMMON) -fsanitize=address,fuzzer
 CFLAGS_msan = $(CFLAGS_COMMON) -fsanitize=memory,fuzzer
 CFLAGS_ubsan = $(CFLAGS_COMMON) -fsanitize=undefined,fuzzer
 CFLAGS_lsan = $(CFLAGS_COMMON) -fsanitize=leak,fuzzer
-CFLAGS_tsan = $(CFLAGS_COMMON) -fsanitize=thread,fuzzer -fPIE -pie
 
 CFLAGS_cov = $(CFLAGS_COMMON) -fprofile-instr-generate -fcoverage-mapping -fsanitize=address,fuzzer
 
@@ -15,7 +14,6 @@ CORPUS_asan = corpus_asan
 CORPUS_msan = corpus_msan
 CORPUS_ubsan = corpus_ubsan
 CORPUS_lsan = corpus_lsan
-CORPUS_tsan = corpus_tsan
 
 FUZZER_asan = fuzz_ringbuf_asan
 FUZZER_msan = fuzz_ringbuf_msan
@@ -24,7 +22,7 @@ FUZZER_lsan = fuzz_ringbuf_lsan
 FUZZER_tsan = fuzz_ringbuf_tsan
 FUZZER_cov = fuzz_ringbuf_cov
 
-all: $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(FUZZER_tsan) $(FUZZER_cov)
+all: $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(FUZZER_cov) $(FUZZER_tsan)
 
 $(FUZZER_asan): fuzz_ringbuf.c ../ringbuf.h
 	$(CC) $(CFLAGS_asan) -o $@ $<
@@ -38,23 +36,22 @@ $(FUZZER_ubsan): fuzz_ringbuf.c ../ringbuf.h
 $(FUZZER_lsan): fuzz_ringbuf.c ../ringbuf.h
 	$(CC) $(CFLAGS_lsan) -o $@ $<
 
-$(FUZZER_tsan): fuzz_ringbuf.c ../ringbuf.h
-	$(CC) $(CFLAGS_tsan) -o $@ $<
-
 $(FUZZER_cov): fuzz_ringbuf.c ../ringbuf.h
 	$(CC) $(CFLAGS_cov) -o $@ $<
 
-$(CORPUS_asan) $(CORPUS_msan) $(CORPUS_ubsan) $(CORPUS_lsan) $(CORPUS_tsan):
+$(FUZZER_tsan): test_tsan.c ../ringbuf.h
+	$(CC) $(CFLAGS_COMMON) -fsanitize=thread -fPIE -pie -o $@ $< -pthread
+
+$(CORPUS_asan) $(CORPUS_msan) $(CORPUS_ubsan) $(CORPUS_lsan):
 	mkdir -p $@
 
-run: $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(FUZZER_tsan) $(CORPUS_asan) $(CORPUS_msan) $(CORPUS_ubsan) $(CORPUS_lsan) $(CORPUS_tsan)
+run: $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(CORPUS_asan) $(CORPUS_msan) $(CORPUS_ubsan) $(CORPUS_lsan)
 	@echo "Running all sanitizers..."
 	@bash -c '\
 		./$(FUZZER_asan) $(CORPUS_asan) -max_len=65536 &\
 		./$(FUZZER_msan) $(CORPUS_msan) -max_len=65536 &\
 		./$(FUZZER_ubsan) $(CORPUS_ubsan) -max_len=65536 &\
 		./$(FUZZER_lsan) $(CORPUS_lsan) -max_len=65536 &\
-		./$(FUZZER_tsan) $(CORPUS_tsan) -max_len=65536 &\
 		trap '"'"'jobs -p | xargs -r kill'"'"' EXIT INT TERM;\
 		wait'
 
@@ -70,8 +67,8 @@ run_ubsan: $(FUZZER_ubsan) $(CORPUS_ubsan)
 run_lsan: $(FUZZER_lsan) $(CORPUS_lsan)
 	./$(FUZZER_lsan) $(CORPUS_lsan) -max_len=65536 -jobs=4 -workers=4
 
-run_tsan: $(FUZZER_tsan) $(CORPUS_tsan)
-	./$(FUZZER_tsan) $(CORPUS_tsan) -max_len=65536 -jobs=4 -workers=4
+run_tsan: $(FUZZER_tsan)
+	./test_tsan
 
 cov_report: $(FUZZER_cov) $(CORPUS_asan)
 	LLVM_PROFILE_FILE="cov.profraw" ./$(FUZZER_cov) $(CORPUS_asan) -max_len=65536 -runs=0
@@ -94,9 +91,3 @@ clean:
 	rm -f $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(FUZZER_tsan) $(FUZZER_cov) fuzz-* slow-unit-*
 	rm -rf corpus_asan corpus_msan corpus_ubsan corpus_lsan corpus_tsan crash-* hang-*
 	rm -f cov.profraw cov.profdata default.profraw
-
-test_tsan: test_tsan.c ../ringbuf.h
-	$(CC) $(CFLAGS_COMMON) -fsanitize=thread -fPIE -pie -o $@ $< -pthread
-
-run_test_tsan: test_tsan
-	./test_tsan
