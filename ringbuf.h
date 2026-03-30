@@ -52,7 +52,7 @@ struct ringbuf_stats
  * @brief Iinitalizes ring buffer with a pre-allocated buffer
  *
  * @param rb a pre-allocated buffer atleast the sizeof(struct ringbuf)
- * @param buf a pre-allocated buf wheren the main atomic structure/data is stored
+ * @param buf a pre-allocated buffer where the main atomic structure/data is stored
  * @param buf_size the size of param `buf`
  * @return ringbuf_err_t RbSuccess on success, RbBufferTooSmall if buffer has insufficient space
  */
