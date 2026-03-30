@@ -27,7 +27,7 @@ void *writer(struct ringbuf *rb)
             return NULL;
         }
 
-        a = 0;
+        a++;
     }
     return NULL;
 }
