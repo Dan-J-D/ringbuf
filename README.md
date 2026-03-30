@@ -5,7 +5,7 @@ A single-header, lock-free **SPSC** (Single Producer Single Consumer) ring buffe
 ## Features
 
 - **Single header** - drop `ringbuf.h` into your project
-- **Lock-free** - uses C11 atomics for thread-safe operations without locks
+- **Lock-free** - uses atomics for thread-safe operations without locks
 - **Cache-line padded** - head/tail separated to prevent false sharing
 - **Variable-length data** - automatically prefixes writes with size metadata
 - **Optional statistics** - enable with `#define RINGBUF_STATISTICS` for timing metrics
