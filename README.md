@@ -8,6 +8,7 @@ A single-header, lock-free **SPSC** (Single Producer Single Consumer) ring buffe
 - **Lock-free** - uses atomics for thread-safe operations without locks
 - **Cache-line padded** - head/tail separated to prevent false sharing
 - **Variable-length data** - automatically prefixes writes with size metadata
+- **Big & Little Endianess** - works with both big & little endian systems
 - **Optional statistics** - enable with `#define RINGBUF_STATISTICS` for timing metrics
 - **Shared memory compatible** - works with memory-mapped buffers
 - **Highly portable** - works with any C99+ compiler on architectures including x86, x86-64, ARM, ARM64, RISC-V, and more
