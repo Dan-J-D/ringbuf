@@ -209,21 +209,19 @@ struct ringbuf
 #endif
 };
 
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
+#define RINGBUF_ATOMIC_TYPE atomic_size_t
+#else
+#define RINGBUF_ATOMIC_TYPE volatile size_t
+#endif
+
 struct ringbuf_buf
 {
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
-    atomic_size_t head;
-    uint8_t pad_1[RINGBUF_CACHE_LINE_SIZE - sizeof(atomic_size_t)];
+    RINGBUF_ATOMIC_TYPE head;
+    uint8_t pad_1[RINGBUF_CACHE_LINE_SIZE - sizeof(RINGBUF_ATOMIC_TYPE)];
 
-    atomic_size_t tail;
-    uint8_t pad_2[RINGBUF_CACHE_LINE_SIZE - sizeof(atomic_size_t)];
-#else
-    volatile size_t head;
-    uint8_t pad_1[RINGBUF_CACHE_LINE_SIZE - sizeof(size_t)];
-
-    volatile size_t tail;
-    uint8_t pad_2[RINGBUF_CACHE_LINE_SIZE - sizeof(size_t)];
-#endif
+    RINGBUF_ATOMIC_TYPE tail;
+    uint8_t pad_2[RINGBUF_CACHE_LINE_SIZE - sizeof(RINGBUF_ATOMIC_TYPE)];
 
     uint8_t data[];
 };
