@@ -20,9 +20,10 @@ FUZZER_msan = fuzz_ringbuf_msan
 FUZZER_ubsan = fuzz_ringbuf_ubsan
 FUZZER_lsan = fuzz_ringbuf_lsan
 FUZZER_tsan = fuzz_ringbuf_tsan
+FUZZER_tsan = fuzz_ringbuf_tsan_mpmc
 FUZZER_cov = fuzz_ringbuf_cov
 
-all: $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(FUZZER_cov) $(FUZZER_tsan)
+all: $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(FUZZER_cov) $(FUZZER_tsan) $(FUZZER_tsan_mpmc)
 
 $(FUZZER_asan): fuzz_ringbuf.c ../ringbuf.h
 	$(CC) $(CFLAGS_asan) -o $@ $<
@@ -40,6 +41,9 @@ $(FUZZER_cov): fuzz_ringbuf.c ../ringbuf.h
 	$(CC) $(CFLAGS_cov) -o $@ $<
 
 $(FUZZER_tsan): test_tsan.c ../ringbuf.h
+	$(CC) $(CFLAGS_COMMON) -fsanitize=thread -fPIE -pie -o $@ $< -pthread
+
+$(FUZZER_tsan_mpmc): test_tsan_mpmc.c ../mpmc_ringbuf.h
 	$(CC) $(CFLAGS_COMMON) -fsanitize=thread -fPIE -pie -o $@ $< -pthread
 
 $(CORPUS_asan) $(CORPUS_msan) $(CORPUS_ubsan) $(CORPUS_lsan):
@@ -68,7 +72,10 @@ run_lsan: $(FUZZER_lsan) $(CORPUS_lsan)
 	./$(FUZZER_lsan) $(CORPUS_lsan) -max_len=65536 -jobs=4 -workers=4
 
 run_tsan: $(FUZZER_tsan)
-	./test_tsan
+	./fuzz_ringbuf_tsan
+
+run_tsan_mpmc: $(FUZZER_tsan_mpmc)
+	./fuzz_ringbuf_tsan_mpmc
 
 cov_report: $(FUZZER_cov) $(CORPUS_asan)
 	LLVM_PROFILE_FILE="cov.profraw" ./$(FUZZER_cov) $(CORPUS_asan) -max_len=65536 -runs=0
@@ -88,6 +95,6 @@ clean_cov:
 	rm -f cov.profraw cov.profdata
 
 clean:
-	rm -f $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(FUZZER_tsan) $(FUZZER_cov) fuzz-* slow-unit-*
+	rm -f $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(FUZZER_tsan) $(FUZZER_tsan_mpmc) $(FUZZER_cov) fuzz-* slow-unit-*
 	rm -rf corpus_asan corpus_msan corpus_ubsan corpus_lsan corpus_tsan crash-* hang-*
 	rm -f cov.profraw cov.profdata default.profraw
