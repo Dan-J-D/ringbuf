@@ -19,12 +19,19 @@ static void *writer_thread(void *arg)
 {
     (void)arg;
     uint64_t counter = 0;
-    while (!atomic_load_explicit(&done, memory_order_acquire)) {
+    while (!atomic_load_explicit(&done, memory_order_acquire))
+    {
         uint8_t data[64];
-        for (int i = 0; i < (int)sizeof(data); i++) {
+        for (int i = 0; i < (int)sizeof(data); i++)
+        {
             data[i] = (uint8_t)((counter + i) & 0xFF);
         }
-        ringbuf_write(&rb, data, sizeof(data));
+        ringbuf_err_t err = ringbuf_write(&rb, data, sizeof(data));
+        if (!(err == RbSuccess || err == RbNotEnoughSpace))
+        {
+            fprintf(stderr, "[error] ringbuf_write() returned '%s'\n", ringbuf_stderr(err));
+            return NULL;
+        }
         counter++;
     }
     atomic_store_explicit(&writers_done, 1, memory_order_release);
@@ -34,17 +41,25 @@ static void *writer_thread(void *arg)
 static void *reader_thread(void *arg)
 {
     (void)arg;
-    while (!atomic_load_explicit(&writers_done, memory_order_acquire)) {
+    while (!atomic_load_explicit(&writers_done, memory_order_acquire))
+    {
         uint8_t out[128];
         size_t cap = sizeof(out);
         ringbuf_read(&rb, out, &cap);
     }
     uint8_t out[128];
-    while (atomic_load_explicit(&writers_done, memory_order_acquire)) {
+    while (atomic_load_explicit(&writers_done, memory_order_acquire))
+    {
         size_t cap = sizeof(out);
         ringbuf_err_t err = ringbuf_read(&rb, out, &cap);
-        if (err == RbEmpty) {
+        if (err == RbEmpty)
+        {
             break;
+        }
+        else if (!(err == RbSuccess))
+        {
+            fprintf(stderr, "[error] ringbuf_read() returned '%s'\n", ringbuf_stderr(err));
+            return NULL;
         }
     }
     return NULL;

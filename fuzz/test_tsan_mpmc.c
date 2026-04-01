@@ -26,7 +26,12 @@ static void *writer_thread(void *arg)
         {
             data[i] = (uint8_t)((counter + i) & 0xFF);
         }
-        mpmc_ringbuf_write(&rb, data, sizeof(data));
+        mpmc_ringbuf_err_t err = mpmc_ringbuf_write(&rb, data, sizeof(data));
+        if (!(err == RbSuccess || err == RbNotEnoughSpace))
+        {
+            fprintf(stderr, "[error] mpmc_ringbuf_write() returned '%s'\n", mpmc_ringbuf_stderr(err));
+            return NULL;
+        }
         counter++;
     }
     atomic_store_explicit(&writers_done, 1, memory_order_release);
@@ -50,6 +55,11 @@ static void *reader_thread(void *arg)
         if (err == RbEmpty)
         {
             break;
+        }
+        else if (!(err == RbSuccess))
+        {
+            fprintf(stderr, "[error] mpmc_ringbuf_read() returned '%s'\n", mpmc_ringbuf_stderr(err));
+            return NULL;
         }
     }
     return NULL;

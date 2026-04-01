@@ -257,8 +257,8 @@ struct mpmc_ringbuf_buf
     MPMC_RINGBUF_ATOMIC_TYPE tail;
     uint8_t pad_3[MPMC_RINGBUF_CACHE_LINE_SIZE - sizeof(MPMC_RINGBUF_ATOMIC_TYPE)];
 
-    size_t tail_pending;
-    uint8_t pad_4[MPMC_RINGBUF_CACHE_LINE_SIZE - sizeof(size_t)];
+    MPMC_RINGBUF_ATOMIC_TYPE tail_pending;
+    uint8_t pad_4[MPMC_RINGBUF_CACHE_LINE_SIZE - sizeof(MPMC_RINGBUF_ATOMIC_TYPE)];
 
     uint8_t data[];
 };
