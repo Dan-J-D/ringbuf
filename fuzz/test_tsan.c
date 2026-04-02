@@ -29,7 +29,7 @@ static void *writer_thread(void *arg)
         ringbuf_err_t err = ringbuf_write(&rb, data, sizeof(data));
         if (!(err == RbSuccess || err == RbNotEnoughSpace))
         {
-            fprintf(stderr, "[error] ringbuf_write() returned '%s'\n", ringbuf_stderr(err));
+            fprintf(stderr, "[error] ringbuf_write() returned '%s'\n", ringbuf_strerr(err));
             return NULL;
         }
         counter++;
@@ -58,7 +58,7 @@ static void *reader_thread(void *arg)
         }
         else if (!(err == RbSuccess))
         {
-            fprintf(stderr, "[error] ringbuf_read() returned '%s'\n", ringbuf_stderr(err));
+            fprintf(stderr, "[error] ringbuf_read() returned '%s'\n", ringbuf_strerr(err));
             return NULL;
         }
     }

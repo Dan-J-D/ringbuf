@@ -1,62 +1,57 @@
-#define MPMC_RINGBUF_IMPLEMENTATION
+#define RINGBUF_IMPLEMENTATION
+#define RINGBUF_MPMC
 
 // Can comment this out to remove statistics data and make it faster
-#define MPMC_RINGBUF_STATISTICS
+#define RINGBUF_STATISTICS
 
-#include "mpmc_ringbuf.h"
+#include "ringbuf.h"
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <time.h>
 
-void *writer(struct mpmc_ringbuf *rb)
+void *writer(struct ringbuf *rb)
 {
     time_t start = time(NULL);
     uint8_t a = 0;
-    mpmc_ringbuf_err_t err;
+    ringbuf_err_t err;
     while (difftime(time(NULL), start) < 3.f)
     {
-        err = mpmc_ringbuf_write(rb, &a, sizeof(a));
+        err = ringbuf_mpmc_write(rb, &a, sizeof(a));
         if (err == RbNotEnoughSpace)
             continue;
 
         if (err != RbSuccess)
         {
-            fprintf(stderr, "[writer] Error - mpmc_ringbuf_write() returns code: %s\n", mpmc_ringbuf_strerr(err));
+            fprintf(stderr, "[writer] Error - ringbuf_mpmc_write() returns code: %s\n", ringbuf_strerr(err));
             return NULL;
         }
 
         a++;
+        // printf("writer %d\n", a);
     }
     return NULL;
 }
 
-void *reader(struct mpmc_ringbuf *rb)
+void *reader(struct ringbuf *rb)
 {
     time_t start = time(NULL);
-    uint8_t expected = 0, got = 0;
+    uint8_t got = 0;
     size_t read = sizeof(got);
-    mpmc_ringbuf_err_t err;
+    ringbuf_err_t err;
     while (difftime(time(NULL), start) < 3.5f)
     {
-        err = mpmc_ringbuf_read(rb, &got, &read);
+        read = sizeof(got);
+        err = ringbuf_mpmc_read(rb, &got, &read);
         if (err == RbEmpty)
             continue;
 
         if (err != RbSuccess)
         {
-            fprintf(stderr, "[reader] Error - mpmc_ringbuf_read() returns code: %s\n", mpmc_ringbuf_strerr(err));
+            fprintf(stderr, "[reader] Error - ringbuf_mpmc_read() returns code: %s\n", ringbuf_strerr(err));
             return NULL;
         }
-
-        if (expected != got)
-        {
-            fprintf(stderr, "[reader] Error - expected %d and got %d\n", expected, got);
-            return NULL;
-        }
-
-        expected++;
     }
 
     return NULL;
@@ -64,7 +59,7 @@ void *reader(struct mpmc_ringbuf *rb)
 
 int main(void)
 {
-    pthread_t wthread[2], rthread[1];
+    pthread_t wthread[2], rthread[2];
     int ret;
 
     enum
@@ -72,25 +67,11 @@ int main(void)
         rbdata_size = 0x40000
     };
     void *rbdata = calloc(1, rbdata_size);
-    struct mpmc_ringbuf *rb = (struct mpmc_ringbuf *)calloc(1, sizeof(struct mpmc_ringbuf));
-    mpmc_ringbuf_err_t rbe = mpmc_ringbuf_init(rb, rbdata, rbdata_size);
+    struct ringbuf *rb = (struct ringbuf *)calloc(1, sizeof(struct ringbuf));
+    ringbuf_err_t rbe = ringbuf_init(rb, rbdata, rbdata_size);
     if (rbe != RbSuccess)
     {
-        fprintf(stderr, "Error - mpmc_ringbuf_init() return code: %d\n", rbe);
-        return 1;
-    }
-
-    ret = pthread_create(&wthread[0], NULL, (void *(*)(void *))writer, rb);
-    if (ret)
-    {
-        fprintf(stderr, "Error - pthread_create() return code: %d\n", ret);
-        return 1;
-    }
-
-    ret = pthread_create(&wthread[1], NULL, (void *(*)(void *))writer, rb);
-    if (ret)
-    {
-        fprintf(stderr, "Error - pthread_create() return code: %d\n", ret);
+        fprintf(stderr, "Error - ringbuf_init() return code: %d\n", rbe);
         return 1;
     }
 
@@ -100,8 +81,20 @@ int main(void)
         fprintf(stderr, "Error - pthread_create() return code: %d\n", ret);
         return 1;
     }
-
     ret = pthread_create(&rthread[1], NULL, (void *(*)(void *))reader, rb);
+    if (ret)
+    {
+        fprintf(stderr, "Error - pthread_create() return code: %d\n", ret);
+        return 1;
+    }
+
+    ret = pthread_create(&wthread[0], NULL, (void *(*)(void *))writer, rb);
+    if (ret)
+    {
+        fprintf(stderr, "Error - pthread_create() return code: %d\n", ret);
+        return 1;
+    }
+    ret = pthread_create(&wthread[1], NULL, (void *(*)(void *))writer, rb);
     if (ret)
     {
         fprintf(stderr, "Error - pthread_create() return code: %d\n", ret);
@@ -135,9 +128,9 @@ int main(void)
     }
 
 #ifdef RINGBUF_STATISTICS
-    struct mpmc_ringbuf_stats rb_stats;
-    double avg_read_ns = mpmc_ringbuf_avg_read_ns(rb), avg_write_ns = mpmc_ringbuf_avg_write_ns(rb);
-    mpmc_ringbuf_get_stats(rb, &rb_stats);
+    struct ringbuf_stats rb_stats;
+    double avg_read_ns = ringbuf_avg_read_ns(rb), avg_write_ns = ringbuf_avg_write_ns(rb);
+    ringbuf_get_stats(rb, &rb_stats);
 
     printf("Stats:\n");
     printf("\tbytes_written: %lu\n", rb_stats.bytes_written);
