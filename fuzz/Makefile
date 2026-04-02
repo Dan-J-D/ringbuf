@@ -1,5 +1,5 @@
 CC = clang
-CFLAGS_COMMON = -g -O1 -Wall -Wextra
+CFLAGS_COMMON = -g -Wall -Wextra
 
 SANITIZER ?= address
 
@@ -20,7 +20,7 @@ FUZZER_msan = fuzz_ringbuf_msan
 FUZZER_ubsan = fuzz_ringbuf_ubsan
 FUZZER_lsan = fuzz_ringbuf_lsan
 FUZZER_tsan = fuzz_ringbuf_tsan
-FUZZER_tsan = fuzz_ringbuf_tsan_mpmc
+FUZZER_tsan_mpmc = fuzz_ringbuf_tsan_mpmc
 FUZZER_cov = fuzz_ringbuf_cov
 
 all: $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(FUZZER_cov) $(FUZZER_tsan) $(FUZZER_tsan_mpmc)
@@ -43,7 +43,7 @@ $(FUZZER_cov): fuzz_ringbuf.c ../ringbuf.h
 $(FUZZER_tsan): test_tsan.c ../ringbuf.h
 	$(CC) $(CFLAGS_COMMON) -fsanitize=thread -fPIE -pie -o $@ $< -pthread
 
-$(FUZZER_tsan_mpmc): test_tsan_mpmc.c ../mpmc_ringbuf.h
+$(FUZZER_tsan_mpmc): test_tsan_mpmc.c ../ringbuf.h
 	$(CC) $(CFLAGS_COMMON) -fsanitize=thread -fPIE -pie -o $@ $< -pthread
 
 $(CORPUS_asan) $(CORPUS_msan) $(CORPUS_ubsan) $(CORPUS_lsan):

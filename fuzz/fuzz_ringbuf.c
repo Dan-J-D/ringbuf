@@ -42,7 +42,11 @@ static ringbuf_err_t do_write(const uint8_t *data, size_t data_len)
         return RbSuccess;
     if (rb.buf == NULL)
         return RbCorrupt;
+#ifdef RINGBUF_MPMC
+    return ringbuf_mpmc_write(&rb, data, data_len);
+#else
     return ringbuf_write(&rb, data, data_len);
+#endif
 }
 
 static ringbuf_err_t do_read(size_t max_read)
@@ -53,7 +57,11 @@ static ringbuf_err_t do_read(size_t max_read)
     size_t len = max_read < sizeof(tmp) ? max_read : sizeof(tmp);
     if (len == 0)
         return RbSuccess;
+#ifdef RINGBUF_MPMC
+    return ringbuf_mpmc_read(&rb, tmp, &len);
+#else
     return ringbuf_read(&rb, tmp, &len);
+#endif
 }
 
 static size_t min_size(size_t a, size_t b)
@@ -267,6 +275,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         break;
     }
 
+#ifndef RINGBUF_MPMC
     case OP_CORRUPTION_INJECTION:
     {
         if (off + 2 <= size)
@@ -307,7 +316,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
                     {
                         corrupt_write[j] ^= data[(pos + j + 1) % min_size(size, 4096)];
                     }
-                    ringbuf_write(&rb, corrupt_write, write_len);
+                    do_write(corrupt_write, write_len);
                 }
             }
 
@@ -325,6 +334,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         }
         break;
     }
+#endif
 
     case OP_STRERR:
     {

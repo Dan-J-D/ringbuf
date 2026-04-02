@@ -46,7 +46,7 @@ static void *reader_thread(void *arg)
     {
         uint8_t out[128];
         size_t cap = sizeof(out);
-        ringbuf_read(&rb, out, &cap);
+        ringbuf_mpmc_read(&rb, out, &cap);
     }
     uint8_t out[128];
     while (atomic_load_explicit(&writers_done, memory_order_acquire))

@@ -14,7 +14,7 @@ mpmc_example1: mpmc_example1.c
 	$(CC) $(EXAMPLE1_CFLAGS) mpmc_example1.c -o mpmc_example1
 
 mpmc_example2: mpmc_example2.c
-	$(CC) $(EXAMPLE2_CFLAGS) mpmc_example2.c -o mpmc_example2
+	$(CC) $(EXAMPLE2_CFLAGS) mpmc_example2.c -o mpmc_example2 -ggdb
 
 clean:
 	rm example1 example2 mpmc_example1 mpmc_example2

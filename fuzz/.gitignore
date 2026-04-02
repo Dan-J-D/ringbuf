@@ -5,8 +5,8 @@ fuzz_ringbuf_msan
 fuzz_ringbuf_ubsan
 fuzz_ringbuf_lsan
 fuzz_ringbuf_tsan
+fuzz_ringbuf_tsan_mpmc
 fuzz_ringbuf_cov
-test_tsan
 
 corpus_asan/
 corpus_msan/

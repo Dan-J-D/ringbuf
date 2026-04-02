@@ -183,11 +183,13 @@ static inline uint64_t ringbuf_get_elapsed_ns(ringbuf_time_t *start, ringbuf_tim
 #define RINGBUF_MEMORY_ORDER_RELAXED memory_order_relaxed
 #define RINGBUF_MEMORY_ORDER_ACQUIRE memory_order_acquire
 #define RINGBUF_MEMORY_ORDER_RELEASE memory_order_release
+#define RINGBUF_MEMORY_ORDER_ACQUIRE_RELEASE memory_order_acq_rel
 #define RINGBUF_MEMORY_ORDER_SEQ_CST memory_order_seq_cst
 #elif defined(__GNUC__) || defined(__clang__)
 #define RINGBUF_MEMORY_ORDER_RELAXED __ATOMIC_RELAXED
 #define RINGBUF_MEMORY_ORDER_ACQUIRE __ATOMIC_ACQUIRE
 #define RINGBUF_MEMORY_ORDER_RELEASE __ATOMIC_RELEASE
+#define RINGBUF_MEMORY_ORDER_ACQUIRE_RELEASE __ATOMIC_ACQ_REL
 #define RINGBUF_MEMORY_ORDER_SEQ_CST __ATOMIC_SEQ_CST
 static inline size_t ringbuf_atomic_load_explicit(volatile size_t *ptr, int order)
 {
@@ -272,6 +274,9 @@ struct ringbuf_buf
 
     RINGBUF_ATOMIC_TYPE tail_pending;
     uint8_t pad_4[RINGBUF_CACHE_LINE_SIZE - sizeof(RINGBUF_ATOMIC_TYPE)];
+
+    RINGBUF_ATOMIC_TYPE speculative_read_lock;
+    uint8_t pad_5[RINGBUF_CACHE_LINE_SIZE - sizeof(RINGBUF_ATOMIC_TYPE)];
 #endif
 
     uint8_t data[];
@@ -347,7 +352,7 @@ ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT
     break
 #define BIG_ENDIAN_DEFINE                               \
     end_byte = 1;                                       \
-    for (; end_byte < sizeof(data_len) + 1; end_byte--) \
+    for (; end_byte < sizeof(data_len) + 1; end_byte++) \
         if (((uint8_t *)&data_len)[end_byte - 1] != 0)  \
     break
 
@@ -535,7 +540,7 @@ ringbuf_err_t ringbuf_mpmc_write(struct ringbuf *RESTRICT rb, const uint8_t *RES
     break
 #define BIG_ENDIAN_DEFINE                               \
     end_byte = 1;                                       \
-    for (; end_byte < sizeof(data_len) + 1; end_byte--) \
+    for (; end_byte < sizeof(data_len) + 1; end_byte++) \
         if (((uint8_t *)&data_len)[end_byte - 1] != 0)  \
     break
 
@@ -583,13 +588,13 @@ ringbuf_err_t ringbuf_mpmc_write(struct ringbuf *RESTRICT rb, const uint8_t *RES
         if (available <= 1 + end_byte + data_len)
             return RbNotEnoughSpace;
 
-        if (ringbuf_atomic_compare_exchange_weak_explicit(&rb->buf->head_pending, &head_pending, (head_pending + 1 + end_byte + data_len) % rb->buf_data_size, RINGBUF_MEMORY_ORDER_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
+        if (ringbuf_atomic_compare_exchange_strong_explicit(&rb->buf->head_pending, &head_pending, (head_pending + 1 + end_byte + data_len) % rb->buf_data_size, RINGBUF_MEMORY_ORDER_ACQUIRE_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
             break;
     }
 
     size_t pos = head_pending;
     rb->buf->data[pos] = (uint8_t)end_byte;
-    pos = (pos + 1) % rb->buf_data_size;
+    pos = (pos + sizeof(uint8_t)) % rb->buf_data_size;
 
     for (size_t i = 0; i < (uint8_t)end_byte; i++)
     {
@@ -624,10 +629,13 @@ ringbuf_err_t ringbuf_mpmc_write(struct ringbuf *RESTRICT rb, const uint8_t *RES
         pos = (pos + 1) % rb->buf_data_size;
     }
 
-    if (!ringbuf_atomic_compare_exchange_strong_explicit(&rb->buf->head, &head_pending, pos, RINGBUF_MEMORY_ORDER_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
+    size_t expecting = head_pending;
+    if (!ringbuf_atomic_compare_exchange_strong_explicit(&rb->buf->head, &expecting, pos, RINGBUF_MEMORY_ORDER_ACQUIRE_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
     {
-        while (!ringbuf_atomic_compare_exchange_weak_explicit(&rb->buf->head, &head_pending, pos, RINGBUF_MEMORY_ORDER_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
-            ;
+        do
+        {
+            expecting = head_pending;
+        } while (!ringbuf_atomic_compare_exchange_weak_explicit(&rb->buf->head, &expecting, pos, RINGBUF_MEMORY_ORDER_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED));
     }
 
 #ifdef RINGBUF_STATISTICS
@@ -663,14 +671,29 @@ ringbuf_err_t ringbuf_mpmc_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT o
     // same reason as in `ringbuf_write`
     while (1)
     {
-        tail_pending = ringbuf_atomic_load_explicit(&rb->buf->tail, RINGBUF_MEMORY_ORDER_ACQUIRE);
+        size_t expecting = 0;
+        if (!ringbuf_atomic_compare_exchange_strong_explicit(&rb->buf->speculative_read_lock, &expecting, 1, RINGBUF_MEMORY_ORDER_ACQUIRE_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
+        {
+            do
+            {
+                expecting = 0;
+            } while (!ringbuf_atomic_compare_exchange_weak_explicit(&rb->buf->speculative_read_lock, &expecting, 1, RINGBUF_MEMORY_ORDER_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED));
+        }
+
+        tail_pending = ringbuf_atomic_load_explicit(&rb->buf->tail_pending, RINGBUF_MEMORY_ORDER_ACQUIRE);
         head = ringbuf_atomic_load_explicit(&rb->buf->head, RINGBUF_MEMORY_ORDER_ACQUIRE);
 
         if (head >= rb->buf_data_size || tail_pending >= rb->buf_data_size)
+        {
+            ringbuf_atomic_store_explicit(&rb->buf->speculative_read_lock, 0, RINGBUF_MEMORY_ORDER_RELEASE);
             return RbCorrupt;
+        }
 
         if (tail_pending == head)
+        {
+            ringbuf_atomic_store_explicit(&rb->buf->speculative_read_lock, 0, RINGBUF_MEMORY_ORDER_RELEASE);
             return RbEmpty;
+        }
 
         pos = tail_pending;
         data_len = 0;
@@ -715,18 +738,27 @@ ringbuf_err_t ringbuf_mpmc_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT o
             available = rb->buf_data_size - tail_pending + head;
 
         if (available < 1 + num_len + data_len)
+        {
+            ringbuf_atomic_store_explicit(&rb->buf->speculative_read_lock, 0, RINGBUF_MEMORY_ORDER_RELEASE);
             return RbCorrupt;
+        }
 
         size_t capacity = *out_len;
         if (capacity < data_len)
         {
             *out_len = data_len;
             pos = (tail_pending + 1 + num_len + data_len) % rb->buf_data_size;
+            ringbuf_atomic_store_explicit(&rb->buf->speculative_read_lock, 0, RINGBUF_MEMORY_ORDER_RELEASE);
             return RbBufferTooSmall;
         }
 
-        if (ringbuf_atomic_compare_exchange_strong_explicit(&rb->buf->tail_pending, &tail_pending, (tail_pending + 1 + num_len + data_len) % rb->buf_data_size, RINGBUF_MEMORY_ORDER_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
+        if (ringbuf_atomic_compare_exchange_strong_explicit(&rb->buf->tail_pending, &tail_pending, (tail_pending + 1 + num_len + data_len) % rb->buf_data_size, RINGBUF_MEMORY_ORDER_ACQUIRE_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
+        {
+            ringbuf_atomic_store_explicit(&rb->buf->speculative_read_lock, 0, RINGBUF_MEMORY_ORDER_RELEASE);
             break;
+        }
+
+        ringbuf_atomic_store_explicit(&rb->buf->speculative_read_lock, 0, RINGBUF_MEMORY_ORDER_RELEASE);
     }
 
     for (size_t i = 0; i < data_len; i++)
@@ -737,10 +769,13 @@ ringbuf_err_t ringbuf_mpmc_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT o
 
     *out_len = data_len;
 
-    if (!ringbuf_atomic_compare_exchange_strong_explicit(&rb->buf->tail, &tail_pending, pos, RINGBUF_MEMORY_ORDER_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
+    size_t expecting = tail_pending;
+    if (!ringbuf_atomic_compare_exchange_strong_explicit(&rb->buf->tail, &expecting, pos, RINGBUF_MEMORY_ORDER_ACQUIRE_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
     {
-        while (!ringbuf_atomic_compare_exchange_weak_explicit(&rb->buf->tail, &tail_pending, pos, RINGBUF_MEMORY_ORDER_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
-            ;
+        do
+        {
+            expecting = tail_pending;
+        } while (!ringbuf_atomic_compare_exchange_weak_explicit(&rb->buf->tail, &expecting, pos, RINGBUF_MEMORY_ORDER_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED));
     }
 
 #ifdef RINGBUF_STATISTICS
