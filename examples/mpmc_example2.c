@@ -29,7 +29,6 @@ void *writer(struct ringbuf *rb)
         }
 
         a++;
-        // printf("writer %d\n", a);
     }
     return NULL;
 }

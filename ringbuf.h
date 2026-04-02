@@ -277,6 +277,8 @@ struct ringbuf_buf
     uint8_t data[];
 };
 
+#undef RINGBUF_ATOMIC_TYPE
+
 static inline uintptr_t ringbuf_align_sized(uintptr_t ptr, size_t *ptr_size, size_t alignment)
 {
     size_t unalignment = ptr % alignment;
@@ -794,6 +796,11 @@ double ringbuf_avg_read_ns(const struct ringbuf *rb)
     return (double)rb->stats.total_read_ns / rb->stats.reads;
 }
 #endif
+
+#undef RINGBUF_MEMORY_ORDER_RELAXED
+#undef RINGBUF_MEMORY_ORDER_ACQUIRE
+#undef RINGBUF_MEMORY_ORDER_RELEASE
+#undef RINGBUF_MEMORY_ORDER_SEQ_CST
 
 #undef RINGBUF_ALIGNMENT
 #undef RINGBUF_CACHE_LINE_SIZE
