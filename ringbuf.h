@@ -24,8 +24,7 @@
     X(RbSuccess)        \
     X(RbNotEnoughSpace) \
     X(RbEmpty)          \
-    X(RbBufferTooSmall) \
-    X(RbCorrupt)
+    X(RbBufferTooSmall)
 
 #define X(name) name,
 typedef enum ringbuf_err
@@ -86,7 +85,7 @@ ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT
  * @param rb the ring buffer to read from
  * @param out output buffer to store the read data
  * @param out_len on input, the size of the output buffer; on output, the number of bytes read
- * @return ringbuf_err_t RbSuccess on success, RbEmpty if buffer is empty, RbBufferTooSmall if output buffer is too small, RbCorrupt if data is corrupted
+ * @return ringbuf_err_t RbSuccess on success, RbEmpty if buffer is empty, RbBufferTooSmall if output buffer is too small
  */
 ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, size_t *RESTRICT out_len);
 
@@ -329,8 +328,7 @@ ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT
     size_t head = ringbuf_atomic_load_explicit(&rb->buf->head, RINGBUF_MEMORY_ORDER_RELAXED);
     size_t tail = ringbuf_atomic_load_explicit(&rb->buf->tail, RINGBUF_MEMORY_ORDER_ACQUIRE);
 
-    if (head >= rb->buf_data_size || tail >= rb->buf_data_size)
-        return RbCorrupt;
+    assert(head < rb->buf_data_size && tail < rb->buf_data_size);
 
     size_t available;
     if (head > tail)
@@ -339,6 +337,8 @@ ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT
         available = tail - head;
     else
         available = rb->buf_data_size - 1;
+
+    assert(available <= rb->buf_data_size);
 
     size_t pos = head;
 
@@ -375,6 +375,8 @@ ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT
 
     if (available <= 1 + end_byte + data_len)
         return RbNotEnoughSpace;
+
+    assert(end_byte <= (int8_t)sizeof(size_t));
 
     rb->buf->data[pos] = (uint8_t)end_byte;
     pos = (pos + 1) % rb->buf_data_size;
@@ -418,7 +420,7 @@ ringbuf_err_t ringbuf_write(struct ringbuf *RESTRICT rb, const uint8_t *RESTRICT
     ringbuf_get_time(&end);
     rb->stats.total_write_ns += ringbuf_get_elapsed_ns(&start, &end);
     rb->stats.writes++;
-    rb->stats.bytes_written += sizeof(size_t) + data_len;
+    rb->stats.bytes_written += (size_t)end_byte + 1 + data_len;
 #endif
 
     return RbSuccess;
@@ -439,8 +441,7 @@ ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, s
     size_t tail = ringbuf_atomic_load_explicit(&rb->buf->tail, RINGBUF_MEMORY_ORDER_RELAXED);
     size_t head = ringbuf_atomic_load_explicit(&rb->buf->head, RINGBUF_MEMORY_ORDER_ACQUIRE);
 
-    if (head >= rb->buf_data_size || tail >= rb->buf_data_size)
-        return RbCorrupt;
+    assert(head < rb->buf_data_size && tail < rb->buf_data_size);
 
     if (tail == head)
         return RbEmpty;
@@ -451,6 +452,8 @@ ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, s
     // variable length numeric encoding
     uint8_t num_len = rb->buf->data[pos];
     pos = (pos + 1) % rb->buf_data_size;
+
+    assert(num_len <= sizeof(size_t));
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
     for (size_t i = 0; i < MIN(num_len, sizeof(size_t)); i++)
@@ -487,8 +490,10 @@ ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, s
     else
         available = rb->buf_data_size - tail + head;
 
-    if (available < 1 + num_len + data_len)
-        return RbCorrupt;
+    assert(available <= rb->buf_data_size);
+    assert(num_len <= sizeof(size_t));
+
+    assert(available >= 1 + num_len + data_len);
 
     size_t capacity = *out_len;
     if (capacity < data_len)
@@ -512,7 +517,7 @@ ringbuf_err_t ringbuf_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT out, s
     ringbuf_get_time(&end);
     rb->stats.total_read_ns += ringbuf_get_elapsed_ns(&start, &end);
     rb->stats.reads++;
-    rb->stats.bytes_read += sizeof(size_t) + data_len;
+    rb->stats.bytes_read += (size_t)num_len + 1 + data_len;
 #endif
 
     return RbSuccess;
@@ -574,8 +579,7 @@ ringbuf_err_t ringbuf_mpmc_write(struct ringbuf *RESTRICT rb, const uint8_t *RES
         head_pending = ringbuf_atomic_load_explicit(&rb->buf->head_pending, RINGBUF_MEMORY_ORDER_ACQUIRE);
         tail = ringbuf_atomic_load_explicit(&rb->buf->tail, RINGBUF_MEMORY_ORDER_ACQUIRE);
 
-        if (head_pending >= rb->buf_data_size || tail >= rb->buf_data_size)
-            return RbCorrupt;
+        assert(head_pending < rb->buf_data_size && tail < rb->buf_data_size);
 
         size_t available;
         if (head_pending > tail)
@@ -587,6 +591,8 @@ ringbuf_err_t ringbuf_mpmc_write(struct ringbuf *RESTRICT rb, const uint8_t *RES
 
         if (available <= 1 + end_byte + data_len)
             return RbNotEnoughSpace;
+
+        assert(available <= rb->buf_data_size);
 
         if (ringbuf_atomic_compare_exchange_strong_explicit(&rb->buf->head_pending, &head_pending, (head_pending + 1 + end_byte + data_len) % rb->buf_data_size, RINGBUF_MEMORY_ORDER_ACQUIRE_RELEASE, RINGBUF_MEMORY_ORDER_RELAXED))
             break;
@@ -643,11 +649,11 @@ ringbuf_err_t ringbuf_mpmc_write(struct ringbuf *RESTRICT rb, const uint8_t *RES
 #ifdef RINGBUF_MPMC
     atomic_fetch_add_explicit(&rb->stats.total_write_ns, ringbuf_get_elapsed_ns(&start, &end), RINGBUF_MEMORY_ORDER_RELAXED);
     atomic_fetch_add_explicit(&rb->stats.writes, 1, RINGBUF_MEMORY_ORDER_RELAXED);
-    atomic_fetch_add_explicit(&rb->stats.bytes_written, sizeof(size_t) + data_len, RINGBUF_MEMORY_ORDER_RELAXED);
+    atomic_fetch_add_explicit(&rb->stats.bytes_written, (size_t)end_byte + 1 + data_len, RINGBUF_MEMORY_ORDER_RELAXED);
 #else
     rb->stats.total_write_ns += ringbuf_get_elapsed_ns(&start, &end);
     rb->stats.writes++;
-    rb->stats.bytes_written += sizeof(size_t) + data_len;
+    rb->stats.bytes_written += (size_t)end_byte + 1 + data_len;
 #endif
 #endif
 
@@ -667,6 +673,7 @@ ringbuf_err_t ringbuf_mpmc_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT o
 #endif
 
     size_t tail_pending, head, pos, data_len;
+    uint8_t num_len;
 
     // same reason as in `ringbuf_write`
     while (1)
@@ -683,11 +690,7 @@ ringbuf_err_t ringbuf_mpmc_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT o
         tail_pending = ringbuf_atomic_load_explicit(&rb->buf->tail_pending, RINGBUF_MEMORY_ORDER_ACQUIRE);
         head = ringbuf_atomic_load_explicit(&rb->buf->head, RINGBUF_MEMORY_ORDER_ACQUIRE);
 
-        if (head >= rb->buf_data_size || tail_pending >= rb->buf_data_size)
-        {
-            ringbuf_atomic_store_explicit(&rb->buf->speculative_read_lock, 0, RINGBUF_MEMORY_ORDER_RELEASE);
-            return RbCorrupt;
-        }
+        assert(head < rb->buf_data_size && tail_pending < rb->buf_data_size);
 
         if (tail_pending == head)
         {
@@ -699,7 +702,7 @@ ringbuf_err_t ringbuf_mpmc_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT o
         data_len = 0;
 
         // variable length numeric encoding
-        uint8_t num_len = rb->buf->data[pos];
+        num_len = rb->buf->data[pos];
         pos = (pos + 1) % rb->buf_data_size;
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -737,11 +740,10 @@ ringbuf_err_t ringbuf_mpmc_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT o
         else
             available = rb->buf_data_size - tail_pending + head;
 
-        if (available < 1 + num_len + data_len)
-        {
-            ringbuf_atomic_store_explicit(&rb->buf->speculative_read_lock, 0, RINGBUF_MEMORY_ORDER_RELEASE);
-            return RbCorrupt;
-        }
+        assert(available <= rb->buf_data_size);
+        assert(num_len <= sizeof(size_t));
+
+        assert(available >= 1 + num_len + data_len);
 
         size_t capacity = *out_len;
         if (capacity < data_len)
@@ -783,11 +785,11 @@ ringbuf_err_t ringbuf_mpmc_read(struct ringbuf *RESTRICT rb, uint8_t *RESTRICT o
 #ifdef RINGBUF_MPMC
     atomic_fetch_add_explicit(&rb->stats.total_read_ns, ringbuf_get_elapsed_ns(&start, &end), RINGBUF_MEMORY_ORDER_RELAXED);
     atomic_fetch_add_explicit(&rb->stats.reads, 1, RINGBUF_MEMORY_ORDER_RELAXED);
-    atomic_fetch_add_explicit(&rb->stats.bytes_read, sizeof(size_t) + data_len, RINGBUF_MEMORY_ORDER_RELAXED);
+    atomic_fetch_add_explicit(&rb->stats.bytes_read, (size_t)num_len + 1 + data_len, RINGBUF_MEMORY_ORDER_RELAXED);
 #else
     rb->stats.total_read_ns += ringbuf_get_elapsed_ns(&start, &end);
     rb->stats.reads++;
-    rb->stats.bytes_read += sizeof(size_t) + data_len;
+    rb->stats.bytes_read += (size_t)num_len + 1 + data_len;
 #endif
 #endif
 

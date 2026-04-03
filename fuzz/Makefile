@@ -1,5 +1,5 @@
 CC = clang
-CFLAGS_COMMON = -g -Wall -Wextra
+CFLAGS_COMMON = -g -O1 -Wall -Wextra
 
 SANITIZER ?= address
 

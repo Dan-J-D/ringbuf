@@ -1,7 +1,9 @@
 #define RINGBUF_IMPLEMENTATION
+#define RINGBUF_STATISTICS
 #include "../ringbuf.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -26,6 +28,131 @@ static struct ringbuf rb;
 static uint8_t buffer[0x2000] __attribute__((aligned(0x1000)));
 static int initialized = 0;
 
+#ifndef RINGBUF_MEMORY_ORDER_RELAXED
+#define RINGBUF_MEMORY_ORDER_RELAXED __ATOMIC_RELAXED
+#endif
+#ifndef RINGBUF_MEMORY_ORDER_ACQUIRE
+#define RINGBUF_MEMORY_ORDER_ACQUIRE __ATOMIC_ACQUIRE
+#endif
+
+static struct
+{
+    size_t write_success;
+    size_t write_not_enough_space;
+
+    size_t read_success;
+    size_t read_empty;
+    size_t read_buffer_too_small;
+} invariants = {0};
+
+static void reset_invariants(void)
+{
+    memset(&invariants, 0, sizeof(invariants));
+}
+
+static void track_write(ringbuf_err_t err)
+{
+    switch (err)
+    {
+    case RbSuccess:
+        invariants.write_success++;
+        break;
+    case RbNotEnoughSpace:
+        invariants.write_not_enough_space++;
+        break;
+    default:
+        break;
+    }
+}
+
+static void track_read(ringbuf_err_t err)
+{
+    switch (err)
+    {
+    case RbSuccess:
+        invariants.read_success++;
+        break;
+    case RbEmpty:
+        invariants.read_empty++;
+        break;
+    case RbBufferTooSmall:
+        invariants.read_buffer_too_small++;
+        break;
+    default:
+        break;
+    }
+}
+
+static void check_invariants(void)
+{
+    struct ringbuf_stats stats;
+    ringbuf_get_stats(&rb, &stats);
+
+    size_t head = ringbuf_atomic_load_explicit(&rb.buf->head, RINGBUF_MEMORY_ORDER_RELAXED);
+    size_t tail = ringbuf_atomic_load_explicit(&rb.buf->tail, RINGBUF_MEMORY_ORDER_ACQUIRE);
+
+    size_t actual_unread;
+    if (head >= tail)
+        actual_unread = head - tail;
+    else
+        actual_unread = rb.buf_data_size - tail + head;
+
+    if (stats.bytes_written < stats.bytes_read)
+    {
+        fprintf(stderr, "INVARIANT FAIL: bytes_written=%lu < bytes_read=%lu\n", stats.bytes_written, stats.bytes_read);
+        abort();
+    }
+
+    if (stats.bytes_written - stats.bytes_read > rb.buf_data_size)
+    {
+        fprintf(stderr, "INVARIANT FAIL: unread_bytes=%lu > buf_data_size=%lu (stats.writes=%lu reads=%lu head=%lu tail=%lu actual_unread=%lu)\n",
+                stats.bytes_written - stats.bytes_read, rb.buf_data_size, stats.writes, stats.reads, head, tail, actual_unread);
+        abort();
+    }
+
+    if (stats.writes < stats.reads)
+    {
+        fprintf(stderr, "INVARIANT FAIL: writes=%lu < reads=%lu\n", stats.writes, stats.reads);
+        abort();
+    }
+
+    if (head > rb.buf_data_size)
+    {
+        fprintf(stderr, "INVARIANT FAIL: head=%lu > buf_data_size=%lu\n", head, rb.buf_data_size);
+        abort();
+    }
+
+    if (tail > rb.buf_data_size)
+    {
+        fprintf(stderr, "INVARIANT FAIL: tail=%lu > buf_data_size=%lu\n", tail, rb.buf_data_size);
+        abort();
+    }
+
+#ifdef RINGBUF_MPMC
+    size_t head_pending = ringbuf_atomic_load_explicit(&rb.buf->head_pending, RINGBUF_MEMORY_ORDER_ACQUIRE);
+    size_t tail_pending = ringbuf_atomic_load_explicit(&rb.buf->tail_pending, RINGBUF_MEMORY_ORDER_ACQUIRE);
+
+    if (head_pending > rb.buf_data_size)
+    {
+        fprintf(stderr, "INVARIANT FAIL: head_pending=%lu > buf_data_size=%lu\n", head_pending, rb.buf_data_size);
+        abort();
+    }
+
+    if (tail_pending > rb.buf_data_size)
+    {
+        fprintf(stderr, "INVARIANT FAIL: tail_pending=%lu > buf_data_size=%lu\n", tail_pending, rb.buf_data_size);
+        abort();
+    }
+
+    size_t speculative_read_lock = ringbuf_atomic_load_explicit(&rb.buf->speculative_read_lock, RINGBUF_MEMORY_ORDER_ACQUIRE);
+    if (speculative_read_lock > 1)
+    {
+        fprintf(stderr, "INVARIANT FAIL: speculative_read_lock=%lu (expected 0 or 1)\n", speculative_read_lock);
+        abort();
+    }
+#endif
+}
+
 static int reset_ringbuf(void)
 {
     memset(buffer, 0, sizeof(buffer));
@@ -33,6 +160,7 @@ static int reset_ringbuf(void)
     ringbuf_err_t err = ringbuf_init(&rb, buffer, sizeof(buffer));
     if (err != RbSuccess)
         return 0;
+    reset_invariants();
     return 1;
 }
 
@@ -40,33 +168,30 @@ static ringbuf_err_t do_write(const uint8_t *data, size_t data_len)
 {
     if (data_len == 0)
         return RbSuccess;
-    if (rb.buf == NULL)
-        return RbCorrupt;
+    ringbuf_err_t err;
 #ifdef RINGBUF_MPMC
-    return ringbuf_mpmc_write(&rb, data, data_len);
+    err = ringbuf_mpmc_write(&rb, data, data_len);
 #else
-    return ringbuf_write(&rb, data, data_len);
+    err = ringbuf_write(&rb, data, data_len);
 #endif
+    track_write(err);
+    return err;
 }
 
 static ringbuf_err_t do_read(size_t max_read)
 {
-    if (rb.buf == NULL)
-        return RbCorrupt;
     uint8_t tmp[256];
     size_t len = max_read < sizeof(tmp) ? max_read : sizeof(tmp);
     if (len == 0)
         return RbSuccess;
+    ringbuf_err_t err;
 #ifdef RINGBUF_MPMC
-    return ringbuf_mpmc_read(&rb, tmp, &len);
+    err = ringbuf_mpmc_read(&rb, tmp, &len);
 #else
-    return ringbuf_read(&rb, tmp, &len);
+    err = ringbuf_read(&rb, tmp, &len);
 #endif
-}
-
-static size_t min_size(size_t a, size_t b)
-{
-    return a < b ? a : b;
+    track_read(err);
+    return err;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
@@ -88,6 +213,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     {
     case OP_RESET:
     {
+        check_invariants();
         reset_ringbuf();
         break;
     }
@@ -202,6 +328,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
                 }
                 case 2:
                 {
+                    check_invariants();
                     reset_ringbuf();
                     break;
                 }
@@ -275,66 +402,66 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         break;
     }
 
-#ifndef RINGBUF_MPMC
-    case OP_CORRUPTION_INJECTION:
-    {
-        if (off + 2 <= size)
-        {
-            uint8_t num_writes = (data[off] % 5) + 1;
-            uint8_t num_reads = (data[off + 1] % 5) + 1;
-            size_t pos = off + 2;
+        // #ifndef RINGBUF_MPMC
+        //     case OP_CORRUPTION_INJECTION:
+        //     {
+        //         if (off + 2 <= size)
+        //         {
+        //             uint8_t num_writes = (data[off] % 5) + 1;
+        //             uint8_t num_reads = (data[off + 1] % 5) + 1;
+        //             size_t pos = off + 2;
 
-            for (uint8_t i = 0; i < num_writes && pos < size; i++)
-            {
-                size_t len = data[pos] % 65;
-                pos++;
-                if (len > 0 && pos + len <= size)
-                {
-                    do_write(data + pos, len);
-                    pos += len;
-                }
-            }
+        //             for (uint8_t i = 0; i < num_writes && pos < size; i++)
+        //             {
+        //                 size_t len = data[pos] % 65;
+        //                 pos++;
+        //                 if (len > 0 && pos + len <= size)
+        //                 {
+        //                     do_write(data + pos, len);
+        //                     pos += len;
+        //                 }
+        //             }
 
-            uint8_t saved_buffer[sizeof(buffer)];
-            memcpy(saved_buffer, buffer, sizeof(buffer));
+        //             uint8_t saved_buffer[sizeof(buffer)];
+        //             memcpy(saved_buffer, buffer, sizeof(buffer));
 
-            size_t corrupt_pos = data[pos % min_size(size, 4096)] % sizeof(buffer);
-            size_t corrupt_len = data[(pos + 1) % min_size(size, 4096)] % 65;
-            if (corrupt_len > 0 && corrupt_pos + corrupt_len <= sizeof(buffer) && pos + 2 + corrupt_len <= size)
-            {
-                memcpy(buffer + corrupt_pos, data + pos + 2, corrupt_len);
-            }
+        //             size_t corrupt_pos = data[pos % min_size(size, 4096)] % sizeof(buffer);
+        //             size_t corrupt_len = data[(pos + 1) % min_size(size, 4096)] % 65;
+        //             if (corrupt_len > 0 && corrupt_pos + corrupt_len <= sizeof(buffer) && pos + 2 + corrupt_len <= size)
+        //             {
+        //                 memcpy(buffer + corrupt_pos, data + pos + 2, corrupt_len);
+        //             }
 
-            if (off + 3 < size)
-            {
-                uint8_t corrupt_write[65];
-                size_t write_len = data[off + 2] % 65;
-                if (write_len > 0 && off + 3 + write_len <= size && off + 2 + write_len <= size)
-                {
-                    memcpy(corrupt_write, data + off + 3, write_len);
-                    for (size_t j = 0; j < write_len; j++)
-                    {
-                        corrupt_write[j] ^= data[(pos + j + 1) % min_size(size, 4096)];
-                    }
-                    do_write(corrupt_write, write_len);
-                }
-            }
+        //             if (off + 3 < size)
+        //             {
+        //                 uint8_t corrupt_write[65];
+        //                 size_t write_len = data[off + 2] % 65;
+        //                 if (write_len > 0 && off + 3 + write_len <= size && off + 2 + write_len <= size)
+        //                 {
+        //                     memcpy(corrupt_write, data + off + 3, write_len);
+        //                     for (size_t j = 0; j < write_len; j++)
+        //                     {
+        //                         corrupt_write[j] ^= data[(pos + j + 1) % min_size(size, 4096)];
+        //                     }
+        //                     do_write(corrupt_write, write_len);
+        //                 }
+        //             }
 
-            for (uint8_t i = 0; i < num_reads; i++)
-            {
-                do_read(data[(off + i + 1) % min_size(size, 256)] % 65);
-            }
+        //             for (uint8_t i = 0; i < num_reads; i++)
+        //             {
+        //                 do_read(data[(off + i + 1) % min_size(size, 256)] % 65);
+        //             }
 
-            if (off + 2 < size)
-            {
-                do_read(data[off + 2] % 129);
-            }
+        //             if (off + 2 < size)
+        //             {
+        //                 do_read(data[off + 2] % 129);
+        //             }
 
-            memcpy(buffer, saved_buffer, sizeof(buffer));
-        }
-        break;
-    }
-#endif
+        //             memcpy(buffer, saved_buffer, sizeof(buffer));
+        //         }
+        //         break;
+        //     }
+        // #endif
 
     case OP_STRERR:
     {
@@ -345,6 +472,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     default:
         break;
     }
+
+#ifndef RINGBUF_MPMC
+    if (op != OP_CORRUPTION_INJECTION && op != OP_RESET)
+#endif
+        check_invariants();
 
     return 0;
 }
