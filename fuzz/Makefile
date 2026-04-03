@@ -115,10 +115,10 @@ AFL_CORPUS_ubsan = corpus_afl_ubsan
 afl_all: $(AFL_FUZZER_asan) $(AFL_FUZZER_ubsan)
 
 $(AFL_FUZZER_asan): fuzz_ringbuf_afl.c ../ringbuf.h
-	CC=$(AFLCC) CXX=$(AFLCXX) $(AFLCC) $(AFL_CFLAGS) -o $@ $<
+	$(AFLCC) $(AFL_CFLAGS) -o $@ $<
 
 $(AFL_FUZZER_ubsan): fuzz_ringbuf_afl.c ../ringbuf.h
-	CC=$(AFLCC) CXX=$(AFLCXX) $(AFLCC) $(AFL_CFLAGS) -fsanitize=undefined -o $@ $<
+	$(AFLCC) $(AFL_CFLAGS) -fsanitize=undefined -o $@ $<
 
 $(AFL_CORPUS_asan) $(AFL_CORPUS_ubsan):
 	mkdir -p $@

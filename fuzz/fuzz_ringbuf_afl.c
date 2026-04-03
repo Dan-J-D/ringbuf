@@ -72,12 +72,6 @@ static void check_invariants(void)
     size_t head = ringbuf_atomic_load_explicit(&rb.buf->head, RINGBUF_MEMORY_ORDER_RELAXED);
     size_t tail = ringbuf_atomic_load_explicit(&rb.buf->tail, RINGBUF_MEMORY_ORDER_ACQUIRE);
 
-    size_t actual_unread;
-    if (head >= tail)
-        actual_unread = head - tail;
-    else
-        actual_unread = rb.buf_data_size - tail + head;
-
     if (stats.bytes_written < stats.bytes_read)
     {
         fprintf(stderr, "INVARIANT FAIL: bytes_written=%lu < bytes_read=%lu\n", stats.bytes_written, stats.bytes_read);
