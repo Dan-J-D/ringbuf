@@ -8,17 +8,25 @@ fuzz_ringbuf_lsan
 fuzz_ringbuf_tsan
 fuzz_ringbuf_tsan_mpmc
 fuzz_ringbuf_cov
+fuzz_ringbuf_afl_asan
+fuzz_ringbuf_afl_ubsan
+fuzz_ringbuf_arm_tsan
 
 corpus_asan/
 corpus_msan/
 corpus_ubsan/
 corpus_lsan/
 corpus_tsan/
+corpus_afl_asan/
+corpus_afl_ubsan/
 
 crash-*
 hang-*
 fuzz-*
 slow-unit-*
+afl_output_asan/
+afl_output_ubsan/
+
 cov.profraw
 cov.profdata
 default.profraw
