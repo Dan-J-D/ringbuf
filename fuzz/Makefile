@@ -95,7 +95,7 @@ clean_cov:
 	rm -f cov.profraw cov.profdata
 
 clean:
-	rm -f $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(FUZZER_tsan) $(FUZZER_tsan_mpmc) $(FUZZER_cov) $(AFL_FUZZER_asan) $(AFL_FUZZER_ubsan) $(FUZZER_arm_tsan) fuzz-* slow-unit-*
+	rm -f $(FUZZER_asan) $(FUZZER_msan) $(FUZZER_ubsan) $(FUZZER_lsan) $(FUZZER_tsan) $(FUZZER_tsan_mpmc) $(FUZZER_cov) $(AFL_FUZZER_asan) $(AFL_FUZZER_ubsan) fuzz-* slow-unit-*
 	rm -rf corpus_asan corpus_msan corpus_ubsan corpus_lsan corpus_tsan $(AFL_CORPUS_asan) $(AFL_CORPUS_ubsan) crash-* hang-*
 	rm -rf afl_output_asan afl_output_ubsan
 	rm -f cov.profraw cov.profdata default.profraw
@@ -147,25 +147,3 @@ run_afl_asan_parallel: $(AFL_FUZZER_asan) $(AFL_CORPUS_asan)
 	fi
 	afl-fuzz -i $(AFL_CORPUS_asan) -o afl_output_asan -M afl_primary_asan -- ./$(AFL_FUZZER_asan) @@
 	afl-fuzz -i $(AFL_CORPUS_asan) -o afl_output_asan -S afl_secondary_asan -- ./$(AFL_FUZZER_asan) @@
-
-ARM_PREFIX ?= arm-linux-gnueabihf-
-ARM_CC = $(ARM_PREFIX)gcc
-ARM_CFLAGS = -g -O1 -fsanitize=thread -fPIE -pie
-
-FUZZER_arm_tsan = fuzz_ringbuf_arm_tsan
-
-arm_all: $(FUZZER_arm_tsan)
-
-$(FUZZER_arm_tsan): fuzz_ringbuf_afl.c ../ringbuf.h
-	$(ARM_CC) $(ARM_CFLAGS) -o $@ $< -pthread
-
-run_arm_tsan: $(FUZZER_arm_tsan)
-	@echo "Running ARM TSan fuzzer under QEMU..."
-	@if ! command -v qemu-arm &> /dev/null; then \
-		echo "ERROR: qemu-arm not found. Install with: sudo apt install qemu-user"; \
-		exit 1; \
-	fi
-	qemu-arm -L /usr/$(ARM_PREFIX) $(FUZZER_arm_tsan) /dev/null 2>&1 || true
-
-clean_arm:
-	rm -f $(FUZZER_arm_tsan)

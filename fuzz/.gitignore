@@ -10,7 +10,6 @@ fuzz_ringbuf_tsan_mpmc
 fuzz_ringbuf_cov
 fuzz_ringbuf_afl_asan
 fuzz_ringbuf_afl_ubsan
-fuzz_ringbuf_arm_tsan
 
 corpus_asan/
 corpus_msan/
